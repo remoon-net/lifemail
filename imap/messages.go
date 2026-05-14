@@ -47,58 +47,6 @@ func (sess *Session) Expunge(w *imapserver.ExpungeWriter, uids *imap.UIDSet) err
 	return err
 }
 
-// todo
-func (sess *Session) Search(kind imapserver.NumKind, criteria *imap.SearchCriteria, options *imap.SearchOptions) (*imap.SearchData, error) {
-	sess.app.Logger().Debug("Search")
-	mbox := sess.mailbox.Load()
-	if mbox == nil {
-		return nil, nil
-	}
-
-	var (
-		d      imap.SearchData
-		seqSet imap.SeqSet
-		uidSet imap.UIDSet
-	)
-	for seqNum, m := range mbox.Iter(false) {
-		if !m.search(mbox.app, seqNum, criteria) {
-			continue
-		}
-
-		uidSet.AddNum(m.UID())
-		var num uint32
-		switch kind {
-		case imapserver.NumKindSeq:
-			num = seqNum
-			seqSet.AddNum(seqNum)
-		case imapserver.NumKindUID:
-			num = uint32(m.UID())
-		}
-		if d.Min == 0 || num < d.Min {
-			d.Min = num
-		}
-		if d.Max == 0 || num > d.Min {
-			d.Max = num
-		}
-		d.Count++
-		// 最多搜索1000个, 多了就不再返回
-		if d.Count > 1000 {
-			break
-		}
-	}
-	switch kind {
-	case imapserver.NumKindSeq:
-		d.All = seqSet
-	case imapserver.NumKindUID:
-		d.All = uidSet
-	}
-	if options.ReturnSave {
-		mbox.searchRes = uidSet
-	}
-	log.Println("ddddddddddddddddd", d)
-	return &d, nil
-}
-
 func (sess *Session) Fetch(w *imapserver.FetchWriter, numSet imap.NumSet, options *imap.FetchOptions) (err error) {
 	sess.app.Logger().Debug("Fetch")
 	mbox := sess.mailbox.Load()

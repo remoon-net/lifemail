@@ -24,3 +24,18 @@ func TestUIDSet(t *testing.T) {
 	b := x.Contains(4)
 	t.Log(b)
 }
+
+func TestBitMask(t *testing.T) {
+	var (
+		a = 0b0001
+		b = 0b0010
+		c = 0b0100
+		d = 0b1000
+	)
+	var all = a | b | c | d
+	_ = all
+	s := b
+	w := a | c
+	z := s&w == 0
+	t.Log(z)
+}
