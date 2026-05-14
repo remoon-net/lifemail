@@ -33,4 +33,8 @@ func getFieldNext(m *core.Collection, name string) int {
 	return getFieldIndex(m, name) + 1
 }
 
+func beforeUpdatedFileds(m *core.Collection) int {
+	return getFieldIndex(m, "created")
+}
+
 var ErrNoRollback = fmt.Errorf("no rollback")

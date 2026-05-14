@@ -3,17 +3,15 @@ package smtp
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"io"
+	"os"
 	"strings"
-	"time"
 
 	_ "github.com/emersion/go-message/charset"
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tools/filesystem"
 	"github.com/pocketbase/pocketbase/tools/types"
 	"github.com/shynome/err0"
 	"github.com/shynome/err0/try"
@@ -26,6 +24,9 @@ func New(app core.App) (_ *smtp.Server, err error) {
 	msgs := try.To1(app.FindCollectionByNameOrId(db.TableMessages))
 	srv.MaxMessageBytes = msgs.Fields.GetByName("raw").(*core.FileField).MaxSize
 	srv.AllowInsecureAuth = true
+	if app.IsDev() {
+		srv.Debug = os.Stderr
+	}
 	return srv, nil
 }
 
@@ -129,22 +130,17 @@ func (sess *Session) Data(r io.Reader) (err error) {
 		logger.Error("保存邮件消息出错", "error", err)
 	})
 
-	buf := try.To1(io.ReadAll(r))
-	fn := fmt.Sprintf("%d.mail", time.Now().Unix())
-	f := try.To1(filesystem.NewFileFromBytes(buf, fn))
-	msgs := try.To1(app.FindCachedCollectionByNameOrId(db.TableMessages))
-	msg := core.NewRecord(msgs)
-	msg.Load(map[string]any{
-		"account": "",
-		"from":    sess.from,
-		"inbox":   sess.inbox,
-		"outbox":  types.JSONArray[string](sess.outbox),
-		"raw":     f,
-	})
-	if sess.auth != nil {
-		msg.Set("account", sess.auth.Id)
+	buf, err := io.ReadAll(r)
+	try.To(err)
+	extra := map[string]any{
+		"from":   sess.from,
+		"inbox":  sess.inbox,
+		"outbox": types.JSONArray[string](sess.outbox),
 	}
-	try.To(app.Save(msg))
+	if sess.auth != nil {
+		extra["account"] = sess.auth.Id
+	}
+	msg := try.To1(SaveMsg(app, buf, extra))
 
 	for _, acc := range sess.inbox {
 		mailbox := sess.initMailboxTry(acc, "INBOX")
@@ -157,18 +153,7 @@ func (sess *Session) Data(r io.Reader) (err error) {
 			"uid":     0,
 		})
 		err := app.RunInTransaction(func(tx core.App) error {
-			mailbox, err := tx.FindRecordById(db.TableMailboxes, mail.GetString("mailbox"))
-			if err != nil {
-				return err
-			}
-			uidNext := mailbox.GetInt("uid_next")
-			uidNext += 1
-			mailbox.Set("uid_next", uidNext)
-			if err := tx.Save(mailbox); err != nil {
-				return err
-			}
-			mail.Set("uid", uidNext)
-			return tx.Save(mail)
+			return SaveMail(tx, mail)
 		})
 		try.To(err)
 	}

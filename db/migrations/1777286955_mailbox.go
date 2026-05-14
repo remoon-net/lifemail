@@ -41,6 +41,34 @@ func init() {
 				MaxSize: 100 * units.KiB,
 				Help:    "要发送外部的邮箱地址",
 			},
+			&core.TextField{
+				Name: "subject", Id: ID("subject"), System: true,
+				Required: false,
+				Max:      99999,
+				Help:     "邮件字段: Subject",
+			},
+			&core.DateField{
+				Name: "header_date", Id: ID("header_date"), System: true,
+				Required: false,
+				Help:     "邮件字段: DATE",
+			},
+			&core.JSONField{
+				Name: "envelope", Id: ID("envelope"), System: true,
+				Required: false, Hidden: true,
+				MaxSize: 500 * units.KiB,
+				Help:    "邮件信息: Envelope",
+			},
+			&core.JSONField{
+				Name: "header", Id: ID("header"), System: true,
+				Required: false, Hidden: true,
+				MaxSize: 500 * units.KiB,
+				Help:    "邮件头部, 以便SEARCH使用",
+			},
+			&core.NumberField{
+				Name: "size", Id: ID("size"), System: true,
+				OnlyInt: true,
+				Help:    "原始邮件大小",
+			},
 			&core.FileField{
 				Name: "raw", Id: ID("raw"), System: true,
 				Required:  true,
@@ -70,19 +98,49 @@ func init() {
 				Min: 1, Max: 255,
 				Help: "mailbox name",
 			},
+			&core.TextField{
+				Name: "old_name", Id: ID("old_name"), System: true,
+				Required: false, Hidden: true,
+				Max:  255,
+				Help: "",
+			},
+			&core.BoolField{
+				Name: "subscribed", Id: ID("subscribed"), System: true,
+				Required: false,
+				Help:     "",
+			},
+			&core.NumberField{
+				Name: "uid_validity", Id: ID("uid_validity"), System: true,
+				Required: false, Hidden: true,
+				OnlyInt: true, Min: types.Pointer[float64](0),
+				Help: "邮箱文件夹的自增实例id",
+			},
 			&core.NumberField{
 				Name: "uid_next", Id: ID("uid_next"), System: true,
+				Required: false, Hidden: true,
+				OnlyInt: true, Min: types.Pointer[float64](0),
+				Help: "mail 自增uid",
+			},
+			&core.NumberField{
+				Name: "highest_modseq", Id: ID("highest_modseq"), System: true,
+				Required: false, Hidden: true,
+				OnlyInt: true, Min: types.Pointer[float64](0),
+				Help: "mailbox HighestModSeq 只增不减",
+			},
+			&core.NumberField{
+				Name: "attrs", Id: ID("attrs"), System: true,
 				Required: false,
-				OnlyInt:  true, Min: types.Pointer[float64](0),
-				Help: "mailbox 自增uid",
+				Min:      types.Pointer[float64](0),
+				Help:     "MailboxAttrs mask",
 			},
 		)
 		addUpdatedFields(mailboxes)
 		mailboxes.ListRule = types.Pointer("account = @request.auth.id")
 		mailboxes.ViewRule = types.Pointer("account = @request.auth.id")
-		mailboxes.CreateRule = types.Pointer("account = @request.auth.id")
+		mailboxes.CreateRule = nil // 不允许通过 rest api 接口创建, 只能通过邮箱 api 创建
 		mailboxes.UpdateRule = types.Pointer("account = @request.auth.id")
 		mailboxes.DeleteRule = types.Pointer("account = @request.auth.id")
+		mailboxes.AddIndex("mailbox_name", true, "account,name", "") // 邮箱文件夹名在同一个用户下是唯一的
 		try.To(app.Save(mailboxes))
 
 		mails := core.NewBaseCollection(db.TableMails, ID(db.TableMails))
@@ -106,18 +164,31 @@ func init() {
 				Help: "所属信箱",
 			},
 			&core.NumberField{
+				Name: "flags", Id: ID("flags"), System: true,
+				Required: false,
+				Min:      types.Pointer[float64](0),
+				Help:     "mail flags mask",
+			},
+			&core.NumberField{
 				Name: "uid", Id: ID("uid"), System: true,
 				Required: false,
 				OnlyInt:  true, Min: types.Pointer[float64](0),
 				Help: "自增uid",
 			},
+			&core.NumberField{
+				Name: "modseq", Id: ID("modseq"), System: true,
+				Required: false,
+				OnlyInt:  true, Min: types.Pointer[float64](0),
+				Help: "",
+			},
 		)
 		addUpdatedFields(mails)
 		mails.ListRule = types.Pointer("to = @request.auth.id")
 		mails.ViewRule = types.Pointer("to = @request.auth.id")
+		// 只允许通过imap协议进行修改
 		mails.CreateRule = nil
-		mails.UpdateRule = types.Pointer("to = @request.auth.id")
-		mails.DeleteRule = types.Pointer("to = @request.auth.id")
+		mails.UpdateRule = nil
+		mails.DeleteRule = nil
 		try.To(app.Save(mails))
 
 		return nil

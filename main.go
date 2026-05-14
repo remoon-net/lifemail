@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net"
 
 	"github.com/pocketbase/pocketbase"
@@ -16,9 +15,20 @@ import (
 
 func main() {
 	app := pocketbase.New()
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		e.InstallerFunc = func(app core.App, systemSuperuser *core.Record, baseURL string) error {
+			su := core.NewRecord(systemSuperuser.Collection())
+			su.SetEmail("lifemail@remoon.net")
+			su.SetPassword("lifemail@remoon.net")
+			return app.Save(su)
+		}
+		return e.Next()
+	})
+	try.To(app.Bootstrap())
+	logger := app.Logger()
 	ctx := context.Background()
 	eg, ctx := errgroup.WithContext(ctx)
-	{
+	if true {
 		ln := try.To1(net.Listen("tcp", "[::]:25"))
 		defer ln.Close()
 		app.OnServe().BindFunc(func(e *core.ServeEvent) error {
@@ -27,19 +37,35 @@ func main() {
 				if err != nil {
 					return err
 				}
-				log.Println("smtp server listen at:", ln.Addr().String())
+				logger.Warn("smtp server is running", "addr", ln.Addr().String())
 				return srv.Serve(ln)
 			})
 			return e.Next()
 		})
 	}
-	{
-		ln := try.To1(net.Listen("tcp", "[::]:143"))
+	if true {
+		ln := try.To1(net.Listen("tcp", "[::]:587"))
 		defer ln.Close()
 		app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 			eg.Go(func() error {
+				srv, err := smtp.New(e.App)
+				if err != nil {
+					return err
+				}
+				logger.Warn("smtp server is running", "addr", ln.Addr().String())
+				return srv.Serve(ln)
+			})
+			return e.Next()
+		})
+	}
+	if true {
+		ln := try.To1(net.Listen("tcp", "[::]:143"))
+		defer ln.Close()
+		imap.Bind(app)
+		app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+			eg.Go(func() error {
 				srv := imap.New(e.App)
-				log.Println("imap server listen at:", ln.Addr().String())
+				logger.Warn("imap server is running", "addr", ln.Addr().String())
 				return srv.Serve(ln)
 			})
 			return e.Next()
