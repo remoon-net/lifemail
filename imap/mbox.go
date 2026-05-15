@@ -9,6 +9,7 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
 	"github.com/shynome/err0"
 	"github.com/shynome/err0/try"
 	"remoon.net/lifemail/db"
@@ -92,15 +93,15 @@ func (mbox *Mailbox) Status() (_ *imap.StatusData, err error) {
 		Mailbox: mbox.Name(),
 
 		NumMessages: &all,
-		NumRecent:   nil,
+		NumRecent:   types.Pointer[uint32](0),
 		UIDNext:     mbox.UIDNext(),
 		UIDValidity: mbox.UIDValidity(),
 		NumUnseen:   &unseen,
 		NumDeleted:  &deleted,
-		Size:        nil, // 无需实现
+		Size:        types.Pointer[int64](0), // 无需实现
 
 		AppendLimit:    &msgLimit,
-		DeletedStorage: nil,
+		DeletedStorage: types.Pointer[int64](0),
 		HighestModSeq:  mh,
 	}
 	return d, nil
