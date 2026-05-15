@@ -111,14 +111,12 @@ func (mbox *Mailbox) ListData() (ld *imap.ListData, err error) {
 	defer err0.Then(&err, nil, nil)
 	status := try.To1(mbox.Status())
 	ld = &imap.ListData{
-		Attrs:   mbox.Attrs(),
-		Delim:   mailboxDelim,
-		Mailbox: status.Mailbox,
-		Status:  status,
-		ChildInfo: &imap.ListDataChildInfo{
-			Subscribed: mbox.GetBool("subscribed"),
-		},
-		OldName: mbox.GetString("old_name"),
+		Attrs:     mbox.Attrs(),
+		Delim:     mailboxDelim,
+		Mailbox:   status.Mailbox,
+		Status:    status,
+		ChildInfo: nil, // 目前不返回子文件夹的订阅状态
+		OldName:   mbox.GetString("old_name"),
 	}
 	return ld, nil
 }
