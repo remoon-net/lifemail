@@ -127,7 +127,7 @@ func CanSQLSearch(q dbx.Expression, c *imap.SearchCriteria) dbx.Expression {
 			f := db.ToMailFlag(f)
 			ff |= f
 		}
-		q2 := dbx.NewExp("flags & {:f} = {:f}", dbx.Params{"f": ff})
+		q2 := dbx.NewExp("flags & {:f} = {:f}", dbx.Params{"f": ff.ToInt()})
 		q = dbx.And(q, q2)
 	}
 	if len(c.NotFlag) > 0 {
@@ -136,7 +136,7 @@ func CanSQLSearch(q dbx.Expression, c *imap.SearchCriteria) dbx.Expression {
 			f := db.ToMailFlag(f)
 			ff |= f
 		}
-		q2 := dbx.NewExp("flags & {:f} = 0", dbx.Params{"f": ff})
+		q2 := dbx.NewExp("flags & {:f} = 0", dbx.Params{"f": ff.ToInt()})
 		q = dbx.And(q, q2)
 	}
 

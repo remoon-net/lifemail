@@ -77,12 +77,12 @@ func (mbox *Mailbox) Status() (_ *imap.StatusData, err error) {
 		return uint32(raw.MaxSize)
 	}()
 	unseen := func() uint32 {
-		q := dbx.NewExp("flags & {:f} = 0", dbx.Params{"f": db.FlagSeen})
+		q := dbx.NewExp("flags & {:f} = 0", dbx.Params{"f": db.FlagSeen.ToInt()})
 		c := try.To1(app.CountRecords(db.TableMails, q))
 		return uint32(c)
 	}()
 	deleted := func() uint32 {
-		q := dbx.NewExp("flags & {:f} != 0", dbx.Params{"f": db.FlagDeleted})
+		q := dbx.NewExp("flags & {:f} != 0", dbx.Params{"f": db.FlagDeleted.ToInt()})
 		c := try.To1(app.CountRecords(db.TableMails, q))
 		return uint32(c)
 	}()

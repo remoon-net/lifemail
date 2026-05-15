@@ -59,6 +59,9 @@ var MailboxAttrMap = map[MailboxAttr]imap.MailboxAttr{
 	MailboxAttrImportant: imap.MailboxAttrImportant,
 }
 
+func (f MailboxAttr) ToInt() uint32 {
+	return uint32(f)
+}
 func (f MailboxAttr) String() string {
 	return string(f.Attr())
 }
@@ -148,6 +151,9 @@ var MailFlagMap = map[MailFlag]imap.Flag{
 	FlagWildcard: imap.FlagWildcard,
 }
 
+func (f MailFlag) ToInt() uint32 {
+	return uint32(f)
+}
 func (f MailFlag) String() string {
 	return string(f.Flag())
 }
