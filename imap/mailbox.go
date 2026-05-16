@@ -86,8 +86,17 @@ func (sess *Session) Create(mailbox string, options *imap.CreateOptions) (err er
 	}
 	return nil
 }
+
+var errINBOX = &imap.Error{
+	Type: imap.StatusResponseTypeNo,
+	Code: imap.ResponseCodeCannot,
+	Text: "can't delete/rename INBOX",
+}
+
 func (sess *Session) Delete(mailbox string) error {
-	sess.app.Logger().Debug("Delete")
+	if mailbox == smtp.INBOX {
+		return errINBOX
+	}
 	mbox, err := sess.getMailbox(mailbox)
 	if err != nil {
 		return err
@@ -95,7 +104,9 @@ func (sess *Session) Delete(mailbox string) error {
 	return sess.app.Delete(mbox)
 }
 func (sess *Session) Rename(mailbox, newName string, options *imap.RenameOptions) error {
-	sess.app.Logger().Debug("Rename")
+	if mailbox == smtp.INBOX {
+		return errINBOX
+	}
 	mbox, err := sess.getMailbox(mailbox)
 	if err != nil {
 		return err
@@ -105,7 +116,6 @@ func (sess *Session) Rename(mailbox, newName string, options *imap.RenameOptions
 	return sess.app.Save(mbox)
 }
 func (sess *Session) Subscribe(mailbox string) error {
-	sess.app.Logger().Debug("Subscribe")
 	mbox, err := sess.getMailbox(mailbox)
 	if err != nil {
 		return err
@@ -114,7 +124,6 @@ func (sess *Session) Subscribe(mailbox string) error {
 	return sess.app.Save(mbox)
 }
 func (sess *Session) Unsubscribe(mailbox string) error {
-	sess.app.Logger().Debug("Unsubscribe")
 	mbox, err := sess.getMailbox(mailbox)
 	if err != nil {
 		return err
@@ -126,7 +135,6 @@ func (sess *Session) Unsubscribe(mailbox string) error {
 const mailboxDelim rune = '/'
 
 func (sess *Session) List(w *imapserver.ListWriter, ref string, patterns []string, options *imap.ListOptions) error {
-	sess.app.Logger().Debug("List")
 	app := sess.app
 	if len(patterns) == 0 {
 		return w.WriteList(&imap.ListData{
@@ -177,15 +185,15 @@ func (sess *Session) List(w *imapserver.ListWriter, ref string, patterns []strin
 	return nil
 }
 func (sess *Session) Status(mailbox string, options *imap.StatusOptions) (*imap.StatusData, error) {
-	sess.app.Logger().Debug("Status")
 	mbox, err := sess.getMailbox(mailbox)
 	if err != nil {
 		return nil, err
 	}
 	return mbox.Status()
 }
+
+// todo: 尚未测试过
 func (sess *Session) Append(mailbox string, r imap.LiteralReader, options *imap.AppendOptions) (_ *imap.AppendData, err error) {
-	sess.app.Logger().Debug("Append")
 	app := sess.app
 	defer err0.Then(&err, nil, nil)
 
