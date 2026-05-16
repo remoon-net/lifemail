@@ -3,12 +3,16 @@ package smtp
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-message/textproto"
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 	"github.com/pocketbase/pocketbase/tools/types"
@@ -17,6 +21,67 @@ import (
 	"remoon.net/lifemail/db"
 )
 
+// if not exists, will create it
+func GetMailboxOrCreate(app core.App, acc, name string, options *imap.CreateOptions) (_ *core.Record, created bool, err error) {
+	q := "account = {:account} && name = {:name}"
+	p := dbx.Params{
+		"account": acc,
+		"name":    name,
+	}
+	mbox, err := app.FindFirstRecordByFilter(db.TableMailboxes, q, p)
+	if err == nil {
+		return mbox, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, err
+	}
+	attrs := db.MailboxAttr(0)
+	if options != nil {
+		for _, attr := range options.SpecialUse {
+			attrs |= db.ToMailboxAttr(attr)
+		}
+	}
+	mboxes := try.To1(app.FindCachedCollectionByNameOrId(db.TableMailboxes))
+	mbox = core.NewRecord(mboxes)
+	mbox.Load(map[string]any{
+		"account":      acc,
+		"name":         name,
+		"attrs":        attrs,
+		"uid_validity": 0,
+		"uid_next":     1,
+	})
+	err = app.RunInTransaction(func(tx core.App) error {
+		_, err := tx.FindFirstRecordByFilter(db.TableMailboxes, q, p)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		acc, err := tx.FindRecordById(db.TableAccounts, mbox.GetString("account"))
+		if err != nil {
+			return err
+		}
+		uvn := acc.GetInt("uid_validity_next")
+		uvn = max(uvn, 1) // 从1开始
+		mbox.Set("uid_validity", uvn)
+		uvn += 1
+		acc.Set("uid_validity_next", uvn)
+		if err := tx.Save(acc); err != nil {
+			return err
+		}
+		if err := tx.Save(mbox); err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return mbox, created, nil
+}
+
 func SaveMail(tx core.App, mail *core.Record) error {
 	mailbox, err := tx.FindRecordById(db.TableMailboxes, mail.GetString("mailbox"))
 	if err != nil {
@@ -24,6 +89,7 @@ func SaveMail(tx core.App, mail *core.Record) error {
 	}
 	if mail.IsNew() {
 		uidNext := mailbox.GetInt("uid_next")
+		uidNext = max(uidNext, 1) // 从1开始
 		mail.Set("uid", uidNext)
 		uidNext += 1
 		mailbox.Set("uid_next", uidNext)

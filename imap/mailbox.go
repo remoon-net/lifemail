@@ -73,38 +73,18 @@ func (sess *Session) getUIDs(mailbox string) (uids []MailUID, err error) {
 	return uids, nil
 }
 func (sess *Session) Create(mailbox string, options *imap.CreateOptions) (err error) {
-	sess.app.Logger().Debug("Create")
-	app := sess.app
-	defer err0.Then(&err, nil, nil)
-	attrs := db.MailboxAttr(0)
-	if options != nil {
-		for _, attr := range options.SpecialUse {
-			attrs |= db.ToMailboxAttr(attr)
+	_, created, err := smtp.GetMailboxOrCreate(sess.app, sess.auth.Id, mailbox, options)
+	if err != nil {
+		return err
+	}
+	if !created {
+		return &imap.Error{
+			Type: imap.StatusResponseTypeNo,
+			Text: fmt.Sprintf("Mailbox %s already exists", mailbox),
+			Code: imap.ResponseCodeAlreadyExists,
 		}
 	}
-	mboxes := try.To1(app.FindCachedCollectionByNameOrId(db.TableMailboxes))
-	mbox := core.NewRecord(mboxes)
-	mbox.Load(map[string]any{
-		"account":      sess.auth.Id,
-		"name":         mailbox,
-		"attrs":        attrs,
-		"uid_validity": 0,
-		"uid_next":     1,
-	})
-	return app.RunInTransaction(func(tx core.App) error {
-		acc, err := tx.FindRecordById(db.TableAccounts, mbox.GetString("account"))
-		if err != nil {
-			return err
-		}
-		uvn := acc.GetInt("uid_validity_next")
-		uvn += 1
-		acc.Set("uid_validity_next", uvn)
-		if err := tx.Save(acc); err != nil {
-			return err
-		}
-		mbox.Set("uid_validity", uvn)
-		return tx.Save(mbox)
-	})
+	return nil
 }
 func (sess *Session) Delete(mailbox string) error {
 	sess.app.Logger().Debug("Delete")

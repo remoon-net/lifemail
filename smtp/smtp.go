@@ -1,8 +1,6 @@
 package smtp
 
 import (
-	"database/sql"
-	"errors"
 	"io"
 	"os"
 	"strings"
@@ -10,7 +8,6 @@ import (
 	_ "github.com/emersion/go-message/charset"
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
-	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 	"github.com/shynome/err0"
@@ -143,7 +140,7 @@ func (sess *Session) Data(r io.Reader) (err error) {
 	msg := try.To1(SaveMsg(app, buf, extra))
 
 	for _, acc := range sess.inbox {
-		mailbox := sess.initMailboxTry(acc, "INBOX")
+		mailbox, _ := try.To2(GetMailboxOrCreate(app, acc, "INBOX", nil))
 		mails := try.To1(app.FindCachedCollectionByNameOrId(db.TableMails))
 		mail := core.NewRecord(mails)
 		mail.Load(map[string]any{
@@ -170,37 +167,6 @@ func (sess *Session) Data(r io.Reader) (err error) {
 	}
 
 	return nil
-}
-
-func (sess *Session) initMailboxTry(acc, name string) (mailbox *core.Record) {
-	app := sess.app
-	q := "account = {:account} && name = {:name}"
-	p := dbx.Params{
-		"account": acc,
-		"name":    name,
-	}
-	mailbox, err := app.FindFirstRecordByFilter(db.TableMailboxes, q, p)
-	if err == nil {
-		return mailbox
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		err0.Throw(err)
-	}
-	mailboxes := try.To1(app.FindCachedCollectionByNameOrId(db.TableMailboxes))
-	mailbox = core.NewRecord(mailboxes)
-	mailbox.Load(p)
-	err = app.RunInTransaction(func(tx core.App) error {
-		_, err = tx.FindFirstRecordByFilter(db.TableMailboxes, q, p)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		return tx.Save(mailbox)
-	})
-	try.To(err)
-	return mailbox
 }
 
 var (
