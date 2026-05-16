@@ -24,9 +24,18 @@ func (sess *Session) Search(kind imapserver.NumKind, criteria *imap.SearchCriter
 	}
 
 	var iterNumSet imap.NumSet = imap.SeqSet{imap.SeqRange{Start: 1, Stop: 0}}
-	if q := CanSQLSearch(&dbx.HashExp{"mailbox": mbox.Id}, criteria); q != nil {
+	var requireMsgsTable bool
+	if q := CanSQLSearch(&dbx.HashExp{"mailbox": mbox.Id}, criteria, &requireMsgsTable); q != nil {
 		numSet := imap.UIDSetNum()
-		rows := try.To1(sess.app.DB().Select("uid").From(db.TableMails).Where(q).Rows())
+		sq := sess.app.DB().
+			Select("uid").
+			From(db.TableMails).
+			Where(q)
+		if requireMsgsTable {
+			sq = sq.LeftJoin(db.TableMessages, dbx.NewExp("messages.id = mails.msg"))
+		}
+		rows, err := sq.Rows()
+		try.To(err)
 		for rows.Next() {
 			var uid uint32
 			try.To(rows.Scan(&uid))
@@ -79,7 +88,7 @@ func (sess *Session) Search(kind imapserver.NumKind, criteria *imap.SearchCriter
 	return &d, nil
 }
 
-func CanSQLSearch(q dbx.Expression, c *imap.SearchCriteria) dbx.Expression {
+func CanSQLSearch(q dbx.Expression, c *imap.SearchCriteria, requireMsgsTable *bool) dbx.Expression {
 	isSame := func(q1 dbx.Expression) func(q2 dbx.Expression) bool {
 		p1 := reflect.ValueOf(q).Pointer()
 		return func(q2 dbx.Expression) bool {
@@ -104,10 +113,12 @@ func CanSQLSearch(q dbx.Expression, c *imap.SearchCriteria) dbx.Expression {
 		q = dbx.And(q, q2)
 	}
 	if !c.SentSince.IsZero() {
+		*requireMsgsTable = true
 		q2 := dbx.NewExp("messages.header_date >= {:t}", dbx.Params{"t": c.SentSince})
 		q = dbx.And(q, q2)
 	}
 	if !c.SentBefore.IsZero() {
+		*requireMsgsTable = true
 		q2 := dbx.NewExp("messages.header_date < {:t}", dbx.Params{"t": c.SentSince})
 		q = dbx.And(q, q2)
 	}
@@ -141,10 +152,12 @@ func CanSQLSearch(q dbx.Expression, c *imap.SearchCriteria) dbx.Expression {
 	}
 
 	if c.Larger > 0 {
+		*requireMsgsTable = true
 		q2 := dbx.NewExp("messages.size >= {:t}", dbx.Params{"t": c.Larger})
 		q = dbx.And(q, q2)
 	}
 	if c.Smaller > 0 {
+		*requireMsgsTable = true
 		q2 := dbx.NewExp("messages.size < {:t}", dbx.Params{"t": c.Smaller})
 		q = dbx.And(q, q2)
 	}
