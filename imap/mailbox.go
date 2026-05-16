@@ -94,7 +94,7 @@ var errINBOX = &imap.Error{
 }
 
 func (sess *Session) Delete(mailbox string) error {
-	if mailbox == smtp.INBOX {
+	if strings.EqualFold(mailbox, smtp.INBOX) {
 		return errINBOX
 	}
 	mbox, err := sess.getMailbox(mailbox)
@@ -104,7 +104,7 @@ func (sess *Session) Delete(mailbox string) error {
 	return sess.app.Delete(mbox)
 }
 func (sess *Session) Rename(mailbox, newName string, options *imap.RenameOptions) error {
-	if mailbox == smtp.INBOX {
+	if strings.EqualFold(mailbox, smtp.INBOX) {
 		return errINBOX
 	}
 	mbox, err := sess.getMailbox(mailbox)
