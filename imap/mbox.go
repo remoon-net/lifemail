@@ -164,6 +164,14 @@ func (mbox *Mailbox) Iter(uidOnly bool, numSet ...imap.NumSet) func(func(seqNum 
 						if s.Contains(uint32(seqNum)) {
 							return true
 						}
+					case *imap.SeqSet:
+						if s.Contains(uint32(seqNum)) {
+							return true
+						}
+					case *imap.UIDSet:
+						if s.Contains(mu.UID) {
+							return true
+						}
 					case imap.UIDSet:
 						if s.Contains(mu.UID) {
 							return true
