@@ -33,7 +33,28 @@ func (sess *Session) Expunge(w *imapserver.ExpungeWriter, uids *imap.UIDSet) err
 		return fmt.Errorf("readonly")
 	}
 	if uids == nil {
-		return nil
+		uidSet := imap.UIDSetNum()
+		q := dbx.HashExp{"mailbox": mbox.Id}
+		c := &imap.SearchCriteria{
+			Flag: []imap.Flag{imap.FlagDeleted},
+		}
+		var requireMsgsTable bool
+		if q := CanSQLSearch(q, c, &requireMsgsTable); q != nil {
+			rows, err := sess.app.DB().Select("uid").From(db.TableMails).Where(q).Rows()
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var uid uint32
+				if err := rows.Scan(&uid); err != nil {
+					return err
+				}
+				uidSet.AddNum(imap.UID(uid))
+			}
+		} else {
+			uidSet.AddRange(1, 0)
+		}
+		uids = &uidSet
 	}
 	idList := []any{}
 	for _, mail := range mbox.Iter(true, uids) {
