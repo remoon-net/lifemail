@@ -89,6 +89,7 @@ func (sess *Session) Create(mailbox string, options *imap.CreateOptions) (err er
 		"name":         mailbox,
 		"attrs":        attrs,
 		"uid_validity": 0,
+		"uid_next":     1,
 	})
 	return app.RunInTransaction(func(tx core.App) error {
 		acc, err := tx.FindRecordById(db.TableAccounts, mbox.GetString("account"))
