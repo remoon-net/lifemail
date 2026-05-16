@@ -138,6 +138,7 @@ func (sess *Session) Copy(numSet imap.NumSet, dest string) (cd *imap.CopyData, e
 		if err != nil {
 			return cd, err
 		}
+		delete(data, "id")
 		nm := core.NewRecord(mails)
 		nm.Load(data)
 		nm.Set("mailbox", mboxDst.Id)
@@ -154,8 +155,42 @@ func (sess *Session) Copy(numSet imap.NumSet, dest string) (cd *imap.CopyData, e
 	return cd, nil
 }
 
-func (sess *Session) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest string) error {
-	sess.app.Logger().Debug("Move")
+func (sess *Session) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest string) (err error) {
+	mbox := sess.mailbox.Load()
+	if mbox == nil {
+		return nil
+	}
+	app := mbox.app
+	defer err0.Then(&err, nil, nil)
+	t := NewMailbox(app, try.To1(sess.getMailboxRecord(dest)))
+	for seqNum, m := range mbox.Iter(false, numSet) {
+		m2 := NewMail(core.NewRecord(m.Collection()))
+		d := try.To1(m.DBExport(app))
+		delete(d, "id")
+		m2.Load(d)
+		m2.Set("mailbox", t.Id)
+		err := app.RunInTransaction(func(tx core.App) error {
+			m.AddFlags(imap.FlagDeleted)
+			if err := smtp.SaveMail(tx, m.ProxyRecord()); err != nil {
+				return err
+			}
+			if err := smtp.SaveMail(tx, m2.ProxyRecord()); err != nil {
+				return nil
+			}
+			if err := tx.Delete(m); err != nil {
+				return err
+			}
+			return nil
+		})
+		try.To(err)
+		cd := &imap.CopyData{
+			UIDValidity: t.UIDValidity(),
+			SourceUIDs:  imap.UIDSetNum(m.UID()),
+			DestUIDs:    imap.UIDSetNum(m2.UID()),
+		}
+		try.To(w.WriteCopyData(cd))
+		try.To(w.WriteExpunge(seqNum))
+	}
 	return nil
 }
 

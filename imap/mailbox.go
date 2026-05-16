@@ -41,9 +41,7 @@ func (sess *Session) Select(mailbox string, options *imap.SelectOptions) (_ *ima
 	return d, nil
 }
 func (sess *Session) getMailbox(mailbox string) (*Mailbox, error) {
-	q := "account = {:account} && name = {:name}"
-	p := dbx.Params{"account": sess.auth.Id, "name": mailbox}
-	record, err := sess.app.FindFirstRecordByFilter(db.TableMailboxes, q, p)
+	record, err := sess.getMailboxRecord(mailbox)
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +51,12 @@ func (sess *Session) getMailbox(mailbox string) (*Mailbox, error) {
 		return mbox, err
 	}
 	return mbox, nil
+}
+func (sess *Session) getMailboxRecord(mailbox string) (*core.Record, error) {
+	q := "account = {:account} && name = {:name}"
+	p := dbx.Params{"account": sess.auth.Id, "name": mailbox}
+	record, err := sess.app.FindFirstRecordByFilter(db.TableMailboxes, q, p)
+	return record, err
 }
 func (sess *Session) getUIDs(mailbox string) (uids []MailUID, err error) {
 	rows, err := sess.app.DB().Select("id", "uid").From(db.TableMails).Where(dbx.HashExp{"mailbox": mailbox}).OrderBy("uid").Rows()
