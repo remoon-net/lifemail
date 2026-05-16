@@ -3,6 +3,7 @@ package imap
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapserver"
