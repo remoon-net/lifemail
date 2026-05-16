@@ -9,6 +9,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/pocketbase/pocketbase/core"
 	"remoon.net/lifemail/db"
+	"remoon.net/lifemail/smtp"
 )
 
 func New(app core.App) *imapserver.Server {
@@ -64,6 +65,9 @@ func (sess *Session) Login(username, password string) error {
 		return imapserver.ErrAuthFailed
 	}
 	sess.auth = acc
+	if _, _, err := smtp.GetMailboxOrCreate(sess.app, acc.Id, smtp.INBOX, nil); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -140,7 +140,7 @@ func (sess *Session) Data(r io.Reader) (err error) {
 	msg := try.To1(SaveMsg(app, buf, extra))
 
 	for _, acc := range sess.inbox {
-		mailbox, _ := try.To2(GetMailboxOrCreate(app, acc, "INBOX", nil))
+		mailbox, _ := try.To2(GetMailboxOrCreate(app, acc, INBOX, nil))
 		mails := try.To1(app.FindCachedCollectionByNameOrId(db.TableMails))
 		mail := core.NewRecord(mails)
 		mail.Load(map[string]any{

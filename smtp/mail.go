@@ -21,6 +21,8 @@ import (
 	"remoon.net/lifemail/db"
 )
 
+const INBOX = "INBOX"
+
 // if not exists, will create it
 func GetMailboxOrCreate(app core.App, acc, name string, options *imap.CreateOptions) (_ *core.Record, created bool, err error) {
 	q := "account = {:account} && name = {:name}"
