@@ -56,16 +56,13 @@ func (sess *Session) Expunge(w *imapserver.ExpungeWriter, uids *imap.UIDSet) err
 		}
 		uids = &uidSet
 	}
-	idList := []any{}
 	for _, mail := range mbox.Iter(true, uids) {
-		idList = append(idList, mail.Id)
+		err := sess.app.Delete(mail)
+		if err != nil {
+			return err
+		}
 	}
-	if len(idList) == 0 {
-		return nil
-	}
-	q := dbx.In("id", idList...)
-	_, err := sess.app.DB().Delete(db.TableMails, q).Execute()
-	return err
+	return nil
 }
 
 func (sess *Session) Fetch(w *imapserver.FetchWriter, numSet imap.NumSet, options *imap.FetchOptions) (err error) {
