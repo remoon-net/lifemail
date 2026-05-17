@@ -23,6 +23,7 @@ type Mailbox struct {
 	updates       []MailUpdate
 	highestModseq atomic.Uint64 // cached highest modseq
 	searchRes     imap.UIDSet
+	subscriber    atomic.Pointer[Subscriber]
 }
 
 type MailUID struct {
@@ -39,10 +40,6 @@ func NewMailbox(app core.App, r *core.Record) *Mailbox {
 		m.highestModseq.Store(m.HighestModseq())
 	}
 	return m
-}
-
-func (mbox *Mailbox) Close() error {
-	return nil
 }
 
 func (mbox *Mailbox) UIDNext() imap.UID {

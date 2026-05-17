@@ -16,7 +16,6 @@ import (
 
 // Authenticated state
 func (sess *Session) Select(mailbox string, options *imap.SelectOptions) (_ *imap.SelectData, err error) {
-	sess.app.Logger().Debug("Select")
 	defer err0.Then(&err, nil, nil)
 	mbox := try.To1(sess.getMailbox(mailbox))
 	if options != nil {
@@ -38,6 +37,7 @@ func (sess *Session) Select(mailbox string, options *imap.SelectOptions) (_ *ima
 		List:              list,
 		HighestModSeq:     status.HighestModSeq,
 	}
+	mbox.subscribeDB()
 	return d, nil
 }
 func (sess *Session) getMailbox(mailbox string) (*Mailbox, error) {

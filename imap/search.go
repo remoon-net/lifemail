@@ -2,7 +2,6 @@ package imap
 
 import (
 	"encoding/json"
-	"log"
 	"reflect"
 	"slices"
 	"strings"
@@ -84,7 +83,7 @@ func (sess *Session) Search(kind imapserver.NumKind, criteria *imap.SearchCriter
 	if options.ReturnSave {
 		mbox.searchRes = uidSet
 	}
-	log.Println("ddddddddddddddddd", d)
+	// log.Println("ddddddddddddddddd", d)
 	return &d, nil
 }
 

@@ -27,7 +27,7 @@ func (mbox *Mailbox) Poll(w *imapserver.UpdateWriter, allowExpunge bool) (err er
 	}()
 	for i, u := range mbox.updates {
 		m := u.mail
-		if u.deleted {
+		if u.deleted && allowExpunge {
 			uids2 := mbox.uids[:0]
 			var seqNumDeleted uint32
 			for seqNum, mu := range mbox.uids {
@@ -66,8 +66,21 @@ func (mbox *Mailbox) Poll(w *imapserver.UpdateWriter, allowExpunge bool) (err er
 	return nil
 }
 
-func (mbox *Mailbox) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) error {
+type Subscriber struct {
+	unsubs []func()
+}
+
+func (s *Subscriber) Unsubscribe() {
+	for _, unsub := range s.unsubs {
+		if unsub != nil {
+			unsub()
+		}
+	}
+}
+
+func (mbox *Mailbox) subscribeDB() {
 	app := mbox.app
+	b := &Subscriber{}
 	{
 		h := app.OnRecordAfterCreateSuccess(db.TableMails)
 		c := h.BindFunc(func(e *core.RecordEvent) error {
@@ -79,11 +92,10 @@ func (mbox *Mailbox) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) erro
 					created: true,
 				})
 				mbox.rw.Unlock()
-				go mbox.Poll(w, true)
 			}
 			return e.Next()
 		})
-		defer h.Unbind(c)
+		b.unsubs = append(b.unsubs, func() { h.Unbind(c) })
 	}
 	{
 		h := app.OnRecordAfterUpdateSuccess(db.TableMails)
@@ -96,11 +108,10 @@ func (mbox *Mailbox) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) erro
 					updated: true,
 				})
 				mbox.rw.Unlock()
-				go mbox.Poll(w, true)
 			}
 			return e.Next()
 		})
-		defer h.Unbind(c)
+		b.unsubs = append(b.unsubs, func() { h.Unbind(c) })
 	}
 	{
 		h := app.OnRecordAfterDeleteSuccess(db.TableMails)
@@ -113,10 +124,43 @@ func (mbox *Mailbox) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) erro
 					deleted: true,
 				})
 				mbox.rw.Unlock()
-				go mbox.Poll(w, true)
 			}
 			return e.Next()
 		})
+		b.unsubs = append(b.unsubs, func() { h.Unbind(c) })
+	}
+	mbox.subscriber.Store(b)
+}
+
+func (mbox *Mailbox) Close() error {
+	if l := mbox.subscriber.Swap(nil); l != nil {
+		l.Unsubscribe()
+	}
+	return nil
+}
+
+func (mbox *Mailbox) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) error {
+	app := mbox.app
+	poll := func(e *core.RecordEvent) error {
+		if err := e.Next(); err != nil {
+			return err
+		}
+		go mbox.Poll(w, true)
+		return nil
+	}
+	{
+		h := app.OnRecordAfterCreateSuccess(db.TableMails)
+		c := h.BindFunc(poll)
+		defer h.Unbind(c)
+	}
+	{
+		h := app.OnRecordAfterUpdateSuccess(db.TableMails)
+		c := h.BindFunc(poll)
+		defer h.Unbind(c)
+	}
+	{
+		h := app.OnRecordAfterDeleteSuccess(db.TableMails)
+		c := h.BindFunc(poll)
 		defer h.Unbind(c)
 	}
 	<-stop
