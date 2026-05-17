@@ -15,6 +15,17 @@ import (
 
 func main() {
 	app := pocketbase.New()
+	var (
+		smtpMTA  string
+		smtpMUA  string
+		imapAddr string
+	)
+	{
+		f := app.RootCmd.PersistentFlags()
+		f.StringVar(&smtpMTA, "smtp-mta", "[::]:25", "smtp relay addr")
+		f.StringVar(&smtpMUA, "smtp-mua", "[::]:587", "smtp submission addr")
+		f.StringVar(&imapAddr, "imap", "[::]:143", "imap server addr")
+	}
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.InstallerFunc = func(app core.App, systemSuperuser *core.Record, baseURL string) error {
 			su := core.NewRecord(systemSuperuser.Collection())
@@ -28,8 +39,8 @@ func main() {
 	logger := app.Logger()
 	ctx := context.Background()
 	eg, ctx := errgroup.WithContext(ctx)
-	if true {
-		ln := try.To1(net.Listen("tcp", "[::]:25"))
+	if smtpMTA != "" {
+		ln := try.To1(net.Listen("tcp", smtpMTA))
 		defer ln.Close()
 		app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 			eg.Go(func() error {
@@ -43,8 +54,8 @@ func main() {
 			return e.Next()
 		})
 	}
-	if true {
-		ln := try.To1(net.Listen("tcp", "[::]:587"))
+	if smtpMUA != "" {
+		ln := try.To1(net.Listen("tcp", smtpMUA))
 		defer ln.Close()
 		app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 			eg.Go(func() error {
@@ -58,8 +69,8 @@ func main() {
 			return e.Next()
 		})
 	}
-	if true {
-		ln := try.To1(net.Listen("tcp", "[::]:143"))
+	if imapAddr != "" {
+		ln := try.To1(net.Listen("tcp", imapAddr))
 		defer ln.Close()
 		imap.Bind(app)
 		app.OnServe().BindFunc(func(e *core.ServeEvent) error {
