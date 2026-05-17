@@ -57,6 +57,7 @@ func (sess *Session) Close() error {
 // Not authenticated state
 func (sess *Session) Login(username, password string) error {
 	username, _, _ = strings.Cut(username, "@")
+	username = smtp.Alias2Account(username)
 	acc, err := sess.app.FindRecordById(db.TableAccounts, username)
 	if err != nil {
 		return imapserver.ErrAuthFailed

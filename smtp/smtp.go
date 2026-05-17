@@ -57,6 +57,7 @@ func (sess *Session) Reset() {
 	sess.auth = nil
 	sess.authSrv = sasl.NewPlainServer(func(identity, username, password string) error {
 		username, _, _ = strings.Cut(username, "@")
+		username = Alias2Account(username)
 		ac, err := sess.app.FindRecordById(db.TableAccounts, username)
 		if err != nil {
 			return smtp.ErrAuthFailed
@@ -112,6 +113,7 @@ func (sess *Session) Target(to string) (local, remote string, err error) {
 	}
 	_, err = sess.app.FindFirstRecordByData(db.TableDomains, "domain", domain)
 	if err == nil {
+		user = Alias2Account(user)
 		return user, "", nil
 	}
 	if sess.auth == nil {
