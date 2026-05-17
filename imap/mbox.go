@@ -68,8 +68,9 @@ func (mbox *Mailbox) Status() (_ *imap.StatusData, err error) {
 	app := mbox.app
 	defer err0.Then(&err, nil, nil)
 
+	bq := dbx.HashExp{"mailbox": mbox.Id}
 	all := func() uint32 {
-		all := try.To1(app.CountRecords(db.TableMails, dbx.HashExp{"mailbox": mbox.Id}))
+		all := try.To1(app.CountRecords(db.TableMails, bq))
 		return uint32(all)
 	}()
 	msgLimit := func() uint32 {
@@ -79,11 +80,13 @@ func (mbox *Mailbox) Status() (_ *imap.StatusData, err error) {
 	}()
 	unseen := func() uint32 {
 		q := dbx.NewExp("flags & {:f} = 0", dbx.Params{"f": db.FlagSeen.ToInt()})
+		q = dbx.And(bq, q)
 		c := try.To1(app.CountRecords(db.TableMails, q))
 		return uint32(c)
 	}()
 	deleted := func() uint32 {
 		q := dbx.NewExp("flags & {:f} != 0", dbx.Params{"f": db.FlagDeleted.ToInt()})
+		q = dbx.And(bq, q)
 		c := try.To1(app.CountRecords(db.TableMails, q))
 		return uint32(c)
 	}()
