@@ -179,7 +179,7 @@ func SaveMail(tx core.App, mail *core.Record) error {
 func SaveMsg(app core.App, buf []byte, extra map[string]any) (msg *core.Record, err error) {
 	defer err0.Then(&err, nil, nil)
 
-	fn := fmt.Sprintf("%d.mail", time.Now().Unix())
+	fn := fmt.Sprintf("%d.eml", time.Now().Unix())
 	f := try.To1(filesystem.NewFileFromBytes(buf, fn))
 
 	br := bufio.NewReader(bytes.NewReader(buf))
