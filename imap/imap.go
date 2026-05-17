@@ -48,7 +48,7 @@ func NewSession(app core.App, conn *imapserver.Conn) *Session {
 }
 
 func (sess *Session) Close() error {
-	if mbox := sess.mailbox.Load(); mbox == nil {
+	if mbox := sess.mailbox.Load(); mbox != nil {
 		mbox.Close()
 	}
 	return nil
