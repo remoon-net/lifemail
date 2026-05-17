@@ -214,5 +214,6 @@ func SaveMsg(app core.App, buf []byte, extra map[string]any) (msg *core.Record, 
 func Alias2Account(name string) string {
 	name, _, _ = strings.Cut(name, "+")
 	name = strings.ReplaceAll(name, ".", "")
+	name = strings.ToLower(name)
 	return name
 }
