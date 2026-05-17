@@ -193,7 +193,6 @@ func (sess *Session) Status(mailbox string, options *imap.StatusOptions) (*imap.
 	return mbox.Status()
 }
 
-// todo: 尚未测试过
 func (sess *Session) Append(mailbox string, r imap.LiteralReader, options *imap.AppendOptions) (_ *imap.AppendData, err error) {
 	app := sess.app
 	defer err0.Then(&err, nil, nil)
@@ -202,6 +201,8 @@ func (sess *Session) Append(mailbox string, r imap.LiteralReader, options *imap.
 		return nil, fmt.Errorf("readonly")
 	}
 
+	mbox := try.To1(sess.getMailbox(mailbox))
+
 	buf := try.To1(io.ReadAll(r))
 	acc := sess.auth.Id
 	extra := map[string]any{
@@ -209,8 +210,6 @@ func (sess *Session) Append(mailbox string, r imap.LiteralReader, options *imap.
 		"inbox":   []string{acc},
 	}
 	msg := try.To1(smtp.SaveMsg(app, buf, extra))
-
-	mbox := try.To1(sess.getMailbox(mailbox))
 
 	mails := try.To1(app.FindCachedCollectionByNameOrId(db.TableMails))
 	mail := NewMail(core.NewRecord(mails))
@@ -229,7 +228,7 @@ func (sess *Session) Append(mailbox string, r imap.LiteralReader, options *imap.
 	try.To(err)
 
 	return &imap.AppendData{
-		UID:         imap.UID(mail.GetInt("uid")),
+		UID:         mail.UID(),
 		UIDValidity: mbox.UIDValidity(),
 	}, nil
 }
