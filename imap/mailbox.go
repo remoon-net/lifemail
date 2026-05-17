@@ -231,12 +231,11 @@ func (sess *Session) Append(mailbox string, r imap.LiteralReader, options *imap.
 
 // todo
 func (sess *Session) Poll(w *imapserver.UpdateWriter, allowExpunge bool) error {
-	sess.app.Logger().Debug("Poll")
 	mbox := sess.mailbox.Load()
 	if mbox == nil {
 		return nil
 	}
-	return nil
+	return mbox.Poll(w, allowExpunge)
 }
 
 func (sess *Session) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) error {
@@ -244,15 +243,5 @@ func (sess *Session) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) erro
 	if mbox == nil {
 		return nil
 	}
-	updateCh := make(chan UpdateMsg)
-	for {
-		select {
-		case <-stop:
-			return nil
-		case <-updateCh:
-		}
-	}
-}
-
-type UpdateMsg struct {
+	return mbox.Idle(w, stop)
 }

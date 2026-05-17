@@ -52,8 +52,8 @@ type Session struct {
 var _ smtp.AuthSession = (*Session)(nil)
 
 func (sess *Session) Reset() {
-	clear(sess.outbox)
-	clear(sess.inbox)
+	sess.outbox = sess.outbox[:0]
+	sess.inbox = sess.inbox[:0]
 	sess.auth = nil
 	sess.authSrv = sasl.NewPlainServer(func(identity, username, password string) error {
 		username, _, _ = strings.Cut(username, "@")
@@ -140,6 +140,9 @@ func (sess *Session) Data(r io.Reader) (err error) {
 	msg := try.To1(SaveMsg(app, buf, extra))
 
 	for _, acc := range sess.inbox {
+		if acc == "" {
+			continue
+		}
 		mailbox, _ := try.To2(GetMailboxOrCreate(app, acc, INBOX, nil))
 		mails := try.To1(app.FindCachedCollectionByNameOrId(db.TableMails))
 		mail := core.NewRecord(mails)

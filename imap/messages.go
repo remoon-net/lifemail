@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapserver"
@@ -24,7 +23,6 @@ func (sess *Session) Unselect() error {
 	return nil
 }
 func (sess *Session) Expunge(w *imapserver.ExpungeWriter, uids *imap.UIDSet) error {
-	sess.app.Logger().Debug("Expunge")
 	mbox := sess.mailbox.Load()
 	if mbox == nil {
 		return nil
@@ -66,7 +64,6 @@ func (sess *Session) Expunge(w *imapserver.ExpungeWriter, uids *imap.UIDSet) err
 }
 
 func (sess *Session) Fetch(w *imapserver.FetchWriter, numSet imap.NumSet, options *imap.FetchOptions) (err error) {
-	sess.app.Logger().Debug("Fetch")
 	mbox := sess.mailbox.Load()
 	if mbox == nil {
 		return nil
@@ -91,7 +88,6 @@ func (sess *Session) Fetch(w *imapserver.FetchWriter, numSet imap.NumSet, option
 			}
 		}
 		wr := w.CreateMessage(seqNum)
-		log.Println("111111111111111", seqNum)
 		err := m.Fetch(sess.app, wr, options)
 		if err != nil {
 			return err
@@ -102,7 +98,6 @@ func (sess *Session) Fetch(w *imapserver.FetchWriter, numSet imap.NumSet, option
 }
 
 func (sess *Session) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags *imap.StoreFlags, options *imap.StoreOptions) error {
-	sess.app.Logger().Debug("Store")
 	mbox := sess.mailbox.Load()
 	if mbox == nil {
 		return nil
@@ -133,7 +128,6 @@ func (sess *Session) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags 
 	return nil
 }
 func (sess *Session) Copy(numSet imap.NumSet, dest string) (cd *imap.CopyData, err error) {
-	sess.app.Logger().Debug("Copy")
 	mbox := sess.mailbox.Load()
 	if mbox == nil {
 		return nil, nil
@@ -223,7 +217,6 @@ func NewMail(r *core.Record) *Mail {
 }
 
 func (m *Mail) Fetch(app core.App, w *imapserver.FetchResponseWriter, options *imap.FetchOptions) (err error) {
-	app.Logger().Debug("Mail Fetch")
 	defer err0.Then(&err, nil, nil)
 
 	msg := try.To1(app.FindRecordById(db.TableMessages, m.GetString("msg")))

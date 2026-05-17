@@ -1,7 +1,6 @@
 package imap
 
 import (
-	"log"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -21,6 +20,7 @@ type Mailbox struct {
 	rw            sync.RWMutex
 	ReadOnly      bool
 	uids          []MailUID
+	updates       []MailUpdate
 	highestModseq atomic.Uint64 // cached highest modseq
 	searchRes     imap.UIDSet
 }
@@ -135,7 +135,7 @@ func (mbox *Mailbox) Iter(uidOnly bool, numSet ...imap.NumSet) func(func(seqNum 
 			s,
 		}
 	}
-	log.Println("888888888888888888888888", numSet)
+	// log.Println("888888888888888888888888", numSet)
 	for i, ss := range numSet {
 		if imap.IsSearchRes(ss) {
 			numSet[i] = mbox.searchRes
@@ -153,7 +153,7 @@ func (mbox *Mailbox) Iter(uidOnly bool, numSet ...imap.NumSet) func(func(seqNum 
 			}
 		}
 	}
-	log.Println("77777777777777777", numSet)
+	// log.Println("77777777777777777", numSet)
 	return func(yield func(uint32, *Mail) bool) {
 		for seqNum, mu := range slices.Backward(uids) {
 			seqNum := seqNum + 1
@@ -192,6 +192,7 @@ func (mbox *Mailbox) Iter(uidOnly bool, numSet ...imap.NumSet) func(func(seqNum 
 				r := core.NewRecord(mm)
 				m = NewMail(r)
 				m.Id = mu.ID
+				m.MarkAsNotNew()
 				m.Set("uid", mu.UID)
 			} else {
 				r, err := mbox.app.FindRecordById(db.TableMails, mu.ID)
