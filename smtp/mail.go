@@ -51,6 +51,7 @@ func GetMailboxOrCreate(app core.App, acc, name string, options *imap.CreateOpti
 		"attrs":        attrs,
 		"uid_validity": 0,
 		"uid_next":     1,
+		"subscribed":   true,
 	})
 	err = app.RunInTransaction(func(tx core.App) error {
 		_, err := tx.FindFirstRecordByFilter(db.TableMailboxes, q, p)
