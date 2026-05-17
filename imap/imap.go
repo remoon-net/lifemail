@@ -65,7 +65,7 @@ func (sess *Session) Login(username, password string) error {
 		return imapserver.ErrAuthFailed
 	}
 	sess.auth = acc
-	if _, _, err := smtp.GetMailboxOrCreate(sess.app, acc.Id, smtp.INBOX, nil); err != nil {
+	if err := smtp.CreateBaseMailboxes(sess.app, acc.Id); err != nil {
 		return err
 	}
 	return nil

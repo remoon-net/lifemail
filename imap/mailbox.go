@@ -3,7 +3,6 @@ package imap
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapserver"
@@ -88,15 +87,15 @@ func (sess *Session) Create(mailbox string, options *imap.CreateOptions) (err er
 	return nil
 }
 
-var errINBOX = &imap.Error{
+var errCannotChangeBaseMailboxes = &imap.Error{
 	Type: imap.StatusResponseTypeNo,
 	Code: imap.ResponseCodeCannot,
-	Text: "can't delete/rename INBOX",
+	Text: "can't change base mailboxes",
 }
 
 func (sess *Session) Delete(mailbox string) error {
-	if strings.EqualFold(mailbox, smtp.INBOX) {
-		return errINBOX
+	if smtp.IsBaseMailboxes(mailbox) {
+		return errCannotChangeBaseMailboxes
 	}
 	mbox, err := sess.getMailbox(mailbox)
 	if err != nil {
@@ -105,8 +104,8 @@ func (sess *Session) Delete(mailbox string) error {
 	return sess.app.Delete(mbox)
 }
 func (sess *Session) Rename(mailbox, newName string, options *imap.RenameOptions) error {
-	if strings.EqualFold(mailbox, smtp.INBOX) {
-		return errINBOX
+	if smtp.IsBaseMailboxes(mailbox) {
+		return errCannotChangeBaseMailboxes
 	}
 	mbox, err := sess.getMailbox(mailbox)
 	if err != nil {

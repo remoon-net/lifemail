@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -22,9 +24,70 @@ import (
 )
 
 const (
-	INBOX = "INBOX"
-	Sent  = "Sent"
+	INBOX   = "INBOX"
+	Drafts  = "Drafts"
+	Sent    = "Sent"
+	Trash   = "Trash"
+	Archive = "Archive"
+	Junk    = "Junk"
 )
+
+var constBaseMailboxes = []string{
+	INBOX,
+	Drafts,
+	Sent,
+	Trash,
+	Archive,
+	Junk,
+}
+
+func IsBaseMailboxes(name string) bool {
+	return slices.ContainsFunc(constBaseMailboxes, func(s string) bool {
+		return strings.EqualFold(s, name)
+	})
+}
+
+func CreateBaseMailboxes(app core.App, acc string) error {
+	if _, _, err := GetMailboxOrCreate(app, acc, INBOX, nil); err != nil {
+		return err
+	}
+	if _, _, err := GetMailboxOrCreate(app, acc, Sent, &imap.CreateOptions{
+		SpecialUse: []imap.MailboxAttr{
+			imap.MailboxAttrSent,
+		},
+	}); err != nil {
+		return err
+	}
+	if _, _, err := GetMailboxOrCreate(app, acc, Drafts, &imap.CreateOptions{
+		SpecialUse: []imap.MailboxAttr{
+			imap.MailboxAttrDrafts,
+		},
+	}); err != nil {
+		return err
+	}
+	if _, _, err := GetMailboxOrCreate(app, acc, Trash, &imap.CreateOptions{
+		SpecialUse: []imap.MailboxAttr{
+			imap.MailboxAttrTrash,
+		},
+	}); err != nil {
+		return err
+	}
+	if _, _, err := GetMailboxOrCreate(app, acc, Archive, &imap.CreateOptions{
+		SpecialUse: []imap.MailboxAttr{
+			imap.MailboxAttrArchive,
+		},
+	}); err != nil {
+		return err
+	}
+	if _, _, err := GetMailboxOrCreate(app, acc, Junk, &imap.CreateOptions{
+		SpecialUse: []imap.MailboxAttr{
+			imap.MailboxAttrJunk,
+		},
+	}); err != nil {
+		return err
+	}
+	return nil
+}
 
 // if not exists, will create it
 func GetMailboxOrCreate(app core.App, acc, name string, options *imap.CreateOptions) (_ *core.Record, created bool, err error) {
