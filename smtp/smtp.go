@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/emersion/go-imap/v2"
 	_ "github.com/emersion/go-message/charset"
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
@@ -141,28 +140,6 @@ func (sess *Session) Data(r io.Reader) (err error) {
 	msg := try.To1(SaveMsg(app, buf, extra))
 
 	mails := try.To1(app.FindCachedCollectionByNameOrId(db.TableMails))
-
-	if sess.auth != nil {
-		acc := sess.auth.Id
-		opts := &imap.CreateOptions{
-			SpecialUse: []imap.MailboxAttr{
-				imap.MailboxAttrSent,
-			},
-		}
-		mbox, _ := try.To2(GetMailboxOrCreate(app, acc, Sent, opts))
-		mail := core.NewRecord(mails)
-		mail.Load(map[string]any{
-			"to":      acc,
-			"msg":     msg.Id,
-			"mailbox": mbox.Id,
-			"uid":     0,
-			"flags":   uint32(db.FlagSeen),
-		})
-		err := app.RunInTransaction(func(tx core.App) error {
-			return SaveMail(tx, mail)
-		})
-		try.To(err)
-	}
 
 	for _, acc := range sess.inbox {
 		if acc == "" {

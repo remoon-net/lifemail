@@ -203,23 +203,28 @@ func (sess *Session) Append(mailbox string, r imap.LiteralReader, options *imap.
 	}
 
 	buf := try.To1(io.ReadAll(r))
+	acc := sess.auth.Id
 	extra := map[string]any{
-		"account": sess.auth.Id,
+		"account": acc,
+		"inbox":   []string{acc},
 	}
 	msg := try.To1(smtp.SaveMsg(app, buf, extra))
 
 	mbox := try.To1(sess.getMailbox(mailbox))
 
 	mails := try.To1(app.FindCachedCollectionByNameOrId(db.TableMails))
-	mail := core.NewRecord(mails)
+	mail := NewMail(core.NewRecord(mails))
 	mail.Load(map[string]any{
 		"to":      sess.auth.Id,
 		"msg":     msg.Id,
 		"mailbox": mbox.Id,
 		"uid":     0,
 	})
+	if options != nil {
+		mail.AddFlags(options.Flags...)
+	}
 	err = app.RunInTransaction(func(tx core.App) error {
-		return smtp.SaveMail(tx, mail)
+		return smtp.SaveMail(tx, mail.ProxyRecord())
 	})
 	try.To(err)
 
