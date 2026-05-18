@@ -142,7 +142,7 @@ func main() {
 				})
 				addr := u.Host
 				if port := u.Port(); port == "" {
-					addr += ":25"
+					addr = net.JoinHostPort(addr, "25")
 				}
 				ln := try.To1(net.Listen("tcp", addr))
 				listeners = append(listeners, ln)
@@ -156,7 +156,7 @@ func main() {
 				})
 				addr := u.Host
 				if port := u.Port(); port == "" {
-					addr += ":465"
+					addr = net.JoinHostPort(addr, "465")
 				}
 				ln := try.To1(tls.Listen("tcp", addr, tc))
 				listeners = append(listeners, ln)
@@ -172,7 +172,7 @@ func main() {
 				})
 				addr := u.Host
 				if port := u.Port(); port == "" {
-					addr += ":143"
+					addr = net.JoinHostPort(addr, "143")
 				}
 				ln := try.To1(net.Listen("tcp", addr))
 				listeners = append(listeners, ln)
@@ -184,7 +184,7 @@ func main() {
 				srv := imap.New(app, tc, nil)
 				addr := u.Host
 				if port := u.Port(); port == "" {
-					addr += ":993"
+					addr = net.JoinHostPort(addr, "993")
 				}
 				ln := try.To1(tls.Listen("tcp", addr, tc))
 				listeners = append(listeners, ln)
