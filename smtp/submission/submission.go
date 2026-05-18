@@ -93,6 +93,15 @@ func (sess *Session) Mail(from string, opts *smtp2.MailOptions) error {
 	if sess.auth == nil {
 		return smtp2.ErrAuthRequired
 	}
+	acc, domain, _ := strings.Cut(from, "@")
+	_, err := sess.app.FindFirstRecordByData(db.TableDomains, "domain", domain)
+	if err != nil {
+		return ErrDomainNotFound
+	}
+	acc = smtp.Alias2Account(acc)
+	if acc != sess.auth.Id {
+		return ErrUnauthorizedSender
+	}
 	sess.from = from
 	return nil
 }
@@ -196,5 +205,10 @@ var (
 		Code:         550,
 		EnhancedCode: smtp2.EnhancedCode{5, 1, 1},
 		Message:      "user unknown",
+	}
+	ErrUnauthorizedSender = &smtp2.SMTPError{
+		Code:         550,
+		EnhancedCode: smtp2.EnhancedCode{5, 7, 1},
+		Message:      "Sender address rejected: not owned by authenticated user",
 	}
 )
