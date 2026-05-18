@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"io"
 	"os"
-	"strings"
 
 	_ "github.com/emersion/go-message/charset"
 	"github.com/emersion/go-sasl"
@@ -63,15 +62,9 @@ func (sess *Session) Mail(from string, opts *smtp.MailOptions) error {
 	return nil
 }
 func (sess *Session) Rcpt(to string, opts *smtp.RcptOptions) error {
-	user, domain, _ := strings.Cut(to, "@")
-	_, err := sess.app.FindFirstRecordByData(db.TableDomains, "domain", domain)
+	user, err := GetAcc(sess.app, to)
 	if err != nil {
-		return ErrDomainNotFound
-	}
-	user = Alias2Account(user)
-	_, err = sess.app.FindRecordById(db.TableAccounts, user)
-	if err != nil {
-		return ErrUserNotFound
+		return err
 	}
 	sess.inbox = append(sess.inbox, user)
 	return nil

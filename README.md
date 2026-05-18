@@ -6,6 +6,7 @@
 
 - [x] 邮箱别名 (和 gmail 类似, 先分割`+`后缀, 后忽略`.`, )
 - [x] 支持证书 TLS (默认不启用, 因为主要目的是用于[well-net](https://github.com/remoon-net/well.git)中)
+- [x] 支持 Cloudflare Email Routing, 对应的 [worker.js](smtp/worker.js)
 
 # Todo
 

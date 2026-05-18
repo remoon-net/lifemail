@@ -95,6 +95,8 @@ func main() {
 		return e.Next()
 	})
 
+	smtp.Bind(app)
+
 	var listeners []net.Listener
 	app.OnTerminate().BindFunc(func(e *core.TerminateEvent) error {
 		defer func() {

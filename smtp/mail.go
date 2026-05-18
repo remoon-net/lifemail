@@ -217,3 +217,17 @@ func Alias2Account(name string) string {
 	name = strings.ToLower(name)
 	return name
 }
+
+func GetAcc(app core.App, to string) (string, error) {
+	user, domain, _ := strings.Cut(to, "@")
+	_, err := app.FindFirstRecordByData(db.TableDomains, "domain", domain)
+	if err != nil {
+		return "", ErrDomainNotFound
+	}
+	user = Alias2Account(user)
+	_, err = app.FindRecordById(db.TableAccounts, user)
+	if err != nil {
+		return "", ErrUserNotFound
+	}
+	return user, nil
+}
