@@ -1,6 +1,7 @@
 package smtp
 
 import (
+	"crypto/tls"
 	"io"
 	"os"
 	"strings"
@@ -15,12 +16,13 @@ import (
 	"remoon.net/lifemail/db"
 )
 
-func New(app core.App) (_ *smtp.Server, err error) {
+func New(app core.App, tc *tls.Config) (_ *smtp.Server, err error) {
 	be := &Backend{app: app}
 	srv := smtp.NewServer(be)
 	msgs := try.To1(app.FindCollectionByNameOrId(db.TableMessages))
 	srv.MaxMessageBytes = msgs.Fields.GetByName("raw").(*core.FileField).MaxSize
-	srv.AllowInsecureAuth = true
+	srv.AllowInsecureAuth = tc == nil
+	srv.TLSConfig = tc
 	if app.IsDev() {
 		srv.Debug = os.Stderr
 	}

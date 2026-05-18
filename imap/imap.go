@@ -1,6 +1,7 @@
 package imap
 
 import (
+	"crypto/tls"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -12,9 +13,10 @@ import (
 	"remoon.net/lifemail/smtp"
 )
 
-func New(app core.App) *imapserver.Server {
+func New(app core.App, tc *tls.Config) *imapserver.Server {
 	opts := &imapserver.Options{
-		InsecureAuth: true,
+		InsecureAuth: tc == nil,
+		TLSConfig:    tc,
 		Caps: imap.CapSet{
 			imap.CapIMAP4rev1: {},
 			imap.CapIMAP4rev2: {},
