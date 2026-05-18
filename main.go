@@ -11,30 +11,35 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/emersion/go-imap/v2/imapserver"
+	smtp2 "github.com/emersion/go-smtp"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/shynome/err0"
 	"github.com/shynome/err0/try"
 	"golang.org/x/sync/errgroup"
+	"remoon.net/lifemail/db"
 	_ "remoon.net/lifemail/db/migrations"
 	"remoon.net/lifemail/imap"
 	"remoon.net/lifemail/smtp"
+	"remoon.net/lifemail/smtp/submission"
 )
 
 func main() {
 	app := pocketbase.New()
 	var (
-		listens []string
-		tlsGet  string
+		listens  []string
+		tlsGet   string
+		smtpAddr string
 	)
 	{
 		f := app.RootCmd.PersistentFlags()
 		f.StringArrayVarP(&listens, "listen", "l", []string{
-			"smtp://[::]:25",
 			"smtp://[::]:587",
 			"imap://[::]:143",
 		}, "监听哪些协议(smtp://, smtps://, imap://, imaps://)")
 		f.StringVar(&tlsGet, "tls", "", "和caddy一样")
+		f.StringVar(&smtpAddr, "smtp-addr", "[::]:25", "smtp MTA 监听地址")
 	}
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.InstallerFunc = func(app core.App, systemSuperuser *core.Record, baseURL string) error {
@@ -103,13 +108,36 @@ func main() {
 	})
 	app.OnServe().BindFunc(func(e *core.ServeEvent) (err error) {
 		defer err0.Then(&err, nil, nil)
-		smtpSrv := try.To1(smtp.New(app, tc))
-		imapSrv := imap.New(app, tc)
+
+		msgs := try.To1(app.FindCollectionByNameOrId(db.TableMessages))
+		applySMTPLimit := func(srv *smtp2.Server) {
+			srv.MaxMessageBytes = msgs.Fields.GetByName("raw").(*core.FileField).MaxSize
+		}
+
+		{
+			srv := smtp.New(app, tc, func(s *smtp2.Server) {
+				applySMTPLimit(s)
+			})
+			msgs := try.To1(app.FindCollectionByNameOrId(db.TableMessages))
+			srv.MaxMessageBytes = msgs.Fields.GetByName("raw").(*core.FileField).MaxSize
+			ln := try.To1(net.Listen("tcp", smtpAddr))
+			listeners = append(listeners, ln)
+			eg.Go(func() error {
+				logger.Warn("smtp MTA server is running", "addr", ln.Addr().String())
+				return srv.Serve(ln)
+			})
+		}
 
 		for _, l := range listens {
 			u := try.To1(url.Parse(l))
 			switch u.Scheme {
 			case "smtp", "smtp+insecure":
+				srv := submission.New(app, tc, func(srv *smtp2.Server) {
+					applySMTPLimit(srv)
+					if u.Scheme == "smtp+insecure" {
+						srv.AllowInsecureAuth = true
+					}
+				})
 				addr := u.Host
 				if port := u.Port(); port == "" {
 					addr += ":25"
@@ -118,9 +146,12 @@ func main() {
 				listeners = append(listeners, ln)
 				eg.Go(func() error {
 					logger.Warn("smtp server is running", "addr", ln.Addr().String())
-					return smtpSrv.Serve(ln)
+					return srv.Serve(ln)
 				})
 			case "smtps":
+				srv := submission.New(app, tc, func(srv *smtp2.Server) {
+					applySMTPLimit(srv)
+				})
 				addr := u.Host
 				if port := u.Port(); port == "" {
 					addr += ":465"
@@ -129,9 +160,14 @@ func main() {
 				listeners = append(listeners, ln)
 				eg.Go(func() error {
 					logger.Warn("smtps server is running", "addr", ln.Addr().String())
-					return smtpSrv.Serve(ln)
+					return srv.Serve(ln)
 				})
 			case "imap", "imap+insecure":
+				srv := imap.New(app, tc, func(opts *imapserver.Options) {
+					if u.Scheme == "imap+insecure" {
+						opts.InsecureAuth = true
+					}
+				})
 				addr := u.Host
 				if port := u.Port(); port == "" {
 					addr += ":143"
@@ -140,9 +176,10 @@ func main() {
 				listeners = append(listeners, ln)
 				eg.Go(func() error {
 					logger.Warn("imap server is running", "addr", ln.Addr().String())
-					return imapSrv.Serve(ln)
+					return srv.Serve(ln)
 				})
 			case "imaps":
+				srv := imap.New(app, tc, nil)
 				addr := u.Host
 				if port := u.Port(); port == "" {
 					addr += ":993"
@@ -151,7 +188,7 @@ func main() {
 				listeners = append(listeners, ln)
 				eg.Go(func() error {
 					logger.Warn("imaps server is running", "addr", ln.Addr().String())
-					return imapSrv.Serve(ln)
+					return srv.Serve(ln)
 				})
 			}
 		}

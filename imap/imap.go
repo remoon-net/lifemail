@@ -13,7 +13,7 @@ import (
 	"remoon.net/lifemail/smtp"
 )
 
-func New(app core.App, tc *tls.Config) *imapserver.Server {
+func New(app core.App, tc *tls.Config, apply func(opts *imapserver.Options)) *imapserver.Server {
 	opts := &imapserver.Options{
 		InsecureAuth: tc == nil,
 		TLSConfig:    tc,
@@ -24,6 +24,9 @@ func New(app core.App, tc *tls.Config) *imapserver.Server {
 		NewSession: func(c *imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
 			return NewSession(app, c), nil, nil
 		},
+	}
+	if apply != nil {
+		apply(opts)
 	}
 	if app.IsDev() {
 		opts.DebugWriter = os.Stderr

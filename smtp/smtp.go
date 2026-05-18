@@ -10,23 +10,23 @@ import (
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tools/types"
 	"github.com/shynome/err0"
 	"github.com/shynome/err0/try"
 	"remoon.net/lifemail/db"
 )
 
-func New(app core.App, tc *tls.Config) (_ *smtp.Server, err error) {
+func New(app core.App, tc *tls.Config, apply func(*smtp.Server)) (_ *smtp.Server) {
 	be := &Backend{app: app}
 	srv := smtp.NewServer(be)
-	msgs := try.To1(app.FindCollectionByNameOrId(db.TableMessages))
-	srv.MaxMessageBytes = msgs.Fields.GetByName("raw").(*core.FileField).MaxSize
-	srv.AllowInsecureAuth = tc == nil
+	srv.AllowInsecureAuth = false
 	srv.TLSConfig = tc
+	if apply != nil {
+		apply(srv)
+	}
 	if app.IsDev() {
 		srv.Debug = os.Stderr
 	}
-	return srv, nil
+	return srv
 }
 
 type Backend struct {
@@ -43,43 +43,13 @@ func (be *Backend) NewSession(c *smtp.Conn) (smtp.Session, error) {
 }
 
 type Session struct {
-	app     core.App
-	authSrv sasl.Server
-	auth    *core.Record
-	from    string
-	inbox   []string // 直接存入本机数据库
-	outbox  []string // 需要转发出去
+	app   core.App
+	from  string
+	inbox []string // 直接存入本机数据库
 }
-
-var _ smtp.AuthSession = (*Session)(nil)
 
 func (sess *Session) Reset() {
-	sess.outbox = sess.outbox[:0]
 	sess.inbox = sess.inbox[:0]
-	sess.auth = nil
-	sess.authSrv = sasl.NewPlainServer(func(identity, username, password string) error {
-		username, _, _ = strings.Cut(username, "@")
-		username = Alias2Account(username)
-		ac, err := sess.app.FindRecordById(db.TableAccounts, username)
-		if err != nil {
-			return smtp.ErrAuthFailed
-		}
-		if !ac.ValidatePassword(password) {
-			return smtp.ErrAuthFailed
-		}
-		sess.auth = ac
-		return nil
-	})
-}
-
-func (sess *Session) AuthMechanisms() []string {
-	return []string{sasl.Plain}
-}
-func (sess *Session) Auth(mech string) (sasl.Server, error) {
-	if mech != sasl.Plain {
-		return nil, smtp.ErrAuthUnknownMechanism
-	}
-	return sess.authSrv, nil
 }
 
 var _ smtp.Session = (*Session)(nil)
@@ -89,39 +59,22 @@ func (sess *Session) Logout() error {
 }
 func (sess *Session) Mail(from string, opts *smtp.MailOptions) error {
 	sess.from = from
+	// todo: 这里应该检查来源是否正确
 	return nil
 }
 func (sess *Session) Rcpt(to string, opts *smtp.RcptOptions) error {
-	localUser, remoteEmail, err := sess.Target(to)
+	user, domain, _ := strings.Cut(to, "@")
+	_, err := sess.app.FindFirstRecordByData(db.TableDomains, "domain", domain)
 	if err != nil {
-		return err
+		return ErrDomainNotFound
 	}
-	if remoteEmail != "" {
-		sess.outbox = append(sess.outbox, remoteEmail)
-		return nil
-	}
-	_, err = sess.app.FindRecordById(db.TableAccounts, localUser)
+	user = Alias2Account(user)
+	_, err = sess.app.FindRecordById(db.TableAccounts, user)
 	if err != nil {
 		return ErrUserNotFound
 	}
-	sess.inbox = append(sess.inbox, localUser)
+	sess.inbox = append(sess.inbox, user)
 	return nil
-}
-
-func (sess *Session) Target(to string) (local, remote string, err error) {
-	user, domain, _ := strings.Cut(to, "@")
-	if domain == "" {
-		return user, "", nil
-	}
-	_, err = sess.app.FindFirstRecordByData(db.TableDomains, "domain", domain)
-	if err == nil {
-		user = Alias2Account(user)
-		return user, "", nil
-	}
-	if sess.auth == nil {
-		return "", "", smtp.ErrAuthRequired
-	}
-	return "", to, nil
 }
 
 func (sess *Session) Data(r io.Reader) (err error) {
@@ -134,12 +87,8 @@ func (sess *Session) Data(r io.Reader) (err error) {
 	buf, err := io.ReadAll(r)
 	try.To(err)
 	extra := map[string]any{
-		"from":   sess.from,
-		"inbox":  sess.inbox,
-		"outbox": types.JSONArray[string](sess.outbox),
-	}
-	if sess.auth != nil {
-		extra["account"] = sess.auth.Id
+		"from":  sess.from,
+		"inbox": sess.inbox,
 	}
 	msg := try.To1(SaveMsg(app, buf, extra))
 
@@ -161,17 +110,6 @@ func (sess *Session) Data(r io.Reader) (err error) {
 			return SaveMail(tx, mail)
 		})
 		try.To(err)
-	}
-
-	for _, to := range sess.outbox {
-		outbounds := try.To1(app.FindCachedCollectionByNameOrId(db.TableOutbounds))
-		outbound := core.NewRecord(outbounds)
-		outbound.Load(map[string]any{
-			"from": sess.auth.Id,
-			"to":   to,
-			"msg":  msg.Id,
-		})
-		try.To(app.Save(outbound))
 	}
 
 	return nil
