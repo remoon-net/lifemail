@@ -60,9 +60,9 @@ func init() {
 			},
 			&core.JSONField{
 				Name: "header", Id: ID("header"), System: true,
-				Required: false, Hidden: true,
-				MaxSize: 500 * units.KiB,
-				Help:    "邮件头部, 以便SEARCH使用",
+				Required: false,
+				MaxSize:  500 * units.KiB,
+				Help:     "邮件头部, 以便SEARCH使用",
 			},
 			&core.NumberField{
 				Name: "size", Id: ID("size"), System: true,
