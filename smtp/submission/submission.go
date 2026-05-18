@@ -185,9 +185,10 @@ func (sess *Session) Data(r io.Reader) (err error) {
 		outbounds := try.To1(app.FindCachedCollectionByNameOrId(db.TableOutbounds))
 		outbound := core.NewRecord(outbounds)
 		outbound.Load(map[string]any{
-			"from": sess.auth.Id,
-			"to":   to,
-			"msg":  msg.Id,
+			"from":          sess.auth.Id,
+			"to":            to,
+			"msg":           msg.Id,
+			"next_retry_at": types.NowDateTime(),
 		})
 		try.To(app.Save(outbound))
 	}
