@@ -18,6 +18,7 @@ import (
 	"github.com/shynome/err0"
 	"github.com/shynome/err0/try"
 	"golang.org/x/sync/errgroup"
+	"remoon.net/lifemail/caldav"
 	"remoon.net/lifemail/db"
 	_ "remoon.net/lifemail/db/migrations"
 	"remoon.net/lifemail/imap"
@@ -27,6 +28,8 @@ import (
 
 func main() {
 	app := pocketbase.New()
+	caldav.Bind(app)
+
 	var (
 		listens  []string
 		tlsGet   string
