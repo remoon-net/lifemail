@@ -1,0 +1,14 @@
+/Caddyfile
+__debug_bin*
+/lifemail
+lifemail.db
+lifemail.db-wal
+lifemail.db-shm
+/attachments
+*.env
+!.env.example
+
+web/node_modules
+web/.svelte-kit
+web/build/*
+!web/build/.gitkeep

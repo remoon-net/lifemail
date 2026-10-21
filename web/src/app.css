@@ -1,0 +1,68 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--font-sans:
+		system-ui, -apple-system, 'Segoe UI', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei',
+		sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, monospace;
+
+	--color-brand-50: #eef2ff;
+	--color-brand-100: #e0e7ff;
+	--color-brand-200: #c7d2fe;
+	--color-brand-300: #a5b4fc;
+	--color-brand-400: #818cf8;
+	--color-brand-500: #6366f1;
+	--color-brand-600: #4f46e5;
+	--color-brand-700: #4338ca;
+	--color-brand-800: #3730a3;
+	--color-brand-900: #312e81;
+}
+
+@layer base {
+	html {
+		color-scheme: light;
+	}
+
+	html.dark {
+		color-scheme: dark;
+	}
+
+	body {
+		@apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+		font-family: var(--font-sans);
+	}
+
+	::selection {
+		@apply bg-brand-200 text-brand-900 dark:bg-brand-500/40 dark:text-white;
+	}
+
+	:focus-visible {
+		@apply outline-2 outline-offset-2 outline-brand-500;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+		}
+	}
+}
+
+@layer utilities {
+	.surface {
+		@apply rounded-xl border border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-900;
+	}
+
+	.muted {
+		@apply text-zinc-500 dark:text-zinc-400;
+	}
+
+	.tabular {
+		font-variant-numeric: tabular-nums;
+	}
+}

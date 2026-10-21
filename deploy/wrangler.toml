@@ -1,0 +1,14 @@
+name = "lifemail-inbound"
+main = "cloudflare-worker.js"
+compatibility_date = "2026-10-01"
+
+# The endpoint of your lifemail instance. Keep it on HTTPS.
+[vars]
+LIFEMAIL_INBOUND_URL = "https://mail.example.com/api/inbound"
+
+# Set the shared secret out of band:
+#   npx wrangler secret put LIFEMAIL_INBOUND_TOKEN
+#
+# Then route mail to the Worker:
+#   Dashboard -> Email Service -> Email Routing -> Routing rules
+#   (a catch-all rule to this Worker is the usual setup)
