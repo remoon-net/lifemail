@@ -3,7 +3,7 @@ GOARCH  ?= amd64
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build web check test vet fmt image clean db-status
+.PHONY: build web check test verify vet fmt image clean db-status
 
 # Build the admin console into web/build, then embed it in the binary.
 web:
@@ -20,6 +20,10 @@ check:
 
 test:
 	go test ./...
+
+# Everything that must be green before a commit. Run it once per change set,
+# then commit; only rerun if a file changed after the check.
+verify: check test
 
 vet:
 	go vet ./...

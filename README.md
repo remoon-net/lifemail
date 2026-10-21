@@ -224,8 +224,8 @@ ARM 服务器：`make build GOARCH=arm64 image`。
 
 ```bash
 go test ./...          # EAS / IMAP / SMTP / 收信 / 管理接口 / 迁移
-go vet ./...
-make check             # gofmt + vet + 前端 svelte-check
+make verify            # 收尾跑一次：gofmt + vet + svelte-check + 全量测试
+make check             # 只做静态检查（gofmt + vet + svelte-check）
 
 cd web
 npm install

@@ -52,12 +52,20 @@ schema 唯一来源是 `internal/store/migrations/NNNN_name.<dialect>.sql`，由
 ## 3. 构建与检查
 
 ```bash
-make check        # gofmt + go vet + svelte-check
-go test ./...     # 全量测试（EAS 约 13s）
-make build        # 前端构建 + 静态编译
+make verify       # 收尾时跑一次：gofmt + vet + svelte-check + go test ./...
+make build        # 前端构建 + 静态编译（只在需要产物时跑）
 ```
 
-提交前 `make check` 与 `go test ./...` 必须全绿。
+**检查只跑一遍。** 改动完成后跑一次 `make verify`，通过就直接提交；
+不要为了“保险”在提交前再跑一次。只有在这之后又改了文件
+（包括编辑器保存触发的格式化）才需要重跑。
+
+迭代过程中不必每次全量，先跑受影响的包：
+
+```bash
+go test ./internal/store/     # 单个包
+cd web && npm run check       # 只做前端类型检查
+```
 
 ## 4. 协议层
 
