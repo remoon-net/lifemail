@@ -7,7 +7,9 @@ Exchange ActiveSync（邮件 / 日历 / 联系人）、IMAPS、SMTPS、收信 AP
 默认 SQLite，数据量或并发上来后可以换成 PostgreSQL。
 
 - 协议层（EAS / IMAP / WBXML / MIME）来自真机验证过的实现，行为细节见 [eas-notes.md](./eas-notes.md)
-- 数据层、HTTP 层、前端是重写的：schema 可以直接演进，不需要兼容历史数据库
+- 数据层、HTTP 层、前端是重写的：**不迁移**重写前的旧库（PocketBase / v0.3.x）
+- 从 v1 起 schema 仍通过编号迁移演进：只前向、已发布文件不可修改；
+  破坏性变更按「加列 → 回填 → 删列」分版本完成。**不存在“不用管迁移”的例外。**
 
 ---
 
@@ -63,8 +65,13 @@ docs/                架构与协议笔记
 - 每个版本两种方言各一个文件（`sqlite` / `postgres`），语句保持一一对应
 - `schema_migrations(version, name, checksum, applied_at)` 记录状态
 - **只前向**：已应用的迁移不会重跑；如果文件内容变了（checksum 不一致）启动会失败，
-  要求新增一个迁移而不是改历史
+  要求新增一个迁移而不是改历史。**不支持降级**，回滚等于恢复备份
+- 破坏性变更分三步，不要在一个版本里同时做：
+  1. 新增列（可空或带默认值），代码同时读写新旧字段
+  2. 回填数据
+  3. 下一版删除旧列
 - 每个文件在事务里执行；PostgreSQL 的迁移连接使用 simple protocol 以便一次执行整个文件
+- `schema_parity_test.go` 静态比对两种方言的表、列、索引与外键；新增迁移必须两边同时加
 
 命令：
 
