@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import Icon from './Icon.svelte';
-	import type { IconName } from '$lib/icons';
+	import type { IconName } from '#lib/icons';
 
 	type Props = {
 		icon?: IconName;

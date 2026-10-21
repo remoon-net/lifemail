@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import Badge from '$lib/components/Badge.svelte';
-	import Card from '$lib/components/Card.svelte';
-	import Icon from '$lib/components/Icon.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
-	import { api } from '$lib/api';
-	import { dateTime } from '$lib/format';
-	import { toast } from '$lib/toast.svelte';
-	import type { Migration, Stats } from '$lib/types';
+	import Badge from '#lib/components/Badge.svelte';
+	import Card from '#lib/components/Card.svelte';
+	import Icon from '#lib/components/Icon.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
+	import { api } from '#lib/api';
+	import { dateTime } from '#lib/format';
+	import { toast } from '#lib/toast.svelte';
+	import type { Migration, Stats } from '#lib/types';
 
 	let stats = $state<Stats | null>(null);
 	let migrations = $state<Migration[]>([]);

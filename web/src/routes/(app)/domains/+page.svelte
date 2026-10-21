@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import Badge from '$lib/components/Badge.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import Card from '$lib/components/Card.svelte';
-	import EmptyState from '$lib/components/EmptyState.svelte';
-	import Icon from '$lib/components/Icon.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
-	import { api } from '$lib/api';
-	import { toast } from '$lib/toast.svelte';
-	import type { Domain } from '$lib/types';
-	import { iconButtonDanger, monoInput } from '$lib/ui';
+	import Badge from '#lib/components/Badge.svelte';
+	import Button from '#lib/components/Button.svelte';
+	import Card from '#lib/components/Card.svelte';
+	import EmptyState from '#lib/components/EmptyState.svelte';
+	import Icon from '#lib/components/Icon.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
+	import { api } from '#lib/api';
+	import { toast } from '#lib/toast.svelte';
+	import type { Domain } from '#lib/types';
+	import { iconButtonDanger, monoInput } from '#lib/ui';
 
 	let domains = $state<Domain[]>([]);
 	let loading = $state(true);

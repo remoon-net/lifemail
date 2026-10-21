@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import Badge from '$lib/components/Badge.svelte';
-	import Card from '$lib/components/Card.svelte';
-	import CopyButton from '$lib/components/CopyButton.svelte';
-	import EmptyState from '$lib/components/EmptyState.svelte';
-	import Icon from '$lib/components/Icon.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
-	import { api } from '$lib/api';
-	import { toast } from '$lib/toast.svelte';
-	import type { CalendarRow } from '$lib/types';
+	import Badge from '#lib/components/Badge.svelte';
+	import Card from '#lib/components/Card.svelte';
+	import CopyButton from '#lib/components/CopyButton.svelte';
+	import EmptyState from '#lib/components/EmptyState.svelte';
+	import Icon from '#lib/components/Icon.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
+	import { api } from '#lib/api';
+	import { toast } from '#lib/toast.svelte';
+	import type { CalendarRow } from '#lib/types';
 
 	let rows = $state<CalendarRow[]>([]);
 	let loading = $state(true);

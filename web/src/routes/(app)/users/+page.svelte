@@ -1,19 +1,19 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import Badge from '$lib/components/Badge.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import Card from '$lib/components/Card.svelte';
-	import CopyButton from '$lib/components/CopyButton.svelte';
-	import EmptyState from '$lib/components/EmptyState.svelte';
-	import Field from '$lib/components/Field.svelte';
-	import Icon from '$lib/components/Icon.svelte';
-	import Modal from '$lib/components/Modal.svelte';
-	import Skeleton from '$lib/components/Skeleton.svelte';
-	import { api } from '$lib/api';
-	import { hueFor, initials, shortDate } from '$lib/format';
-	import { toast } from '$lib/toast.svelte';
-	import type { Alias, User } from '$lib/types';
-	import { iconButton, iconButtonDanger, input } from '$lib/ui';
+	import Badge from '#lib/components/Badge.svelte';
+	import Button from '#lib/components/Button.svelte';
+	import Card from '#lib/components/Card.svelte';
+	import CopyButton from '#lib/components/CopyButton.svelte';
+	import EmptyState from '#lib/components/EmptyState.svelte';
+	import Field from '#lib/components/Field.svelte';
+	import Icon from '#lib/components/Icon.svelte';
+	import Modal from '#lib/components/Modal.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
+	import { api } from '#lib/api';
+	import { hueFor, initials, shortDate } from '#lib/format';
+	import { toast } from '#lib/toast.svelte';
+	import type { Alias, User } from '#lib/types';
+	import { iconButton, iconButtonDanger, input } from '#lib/ui';
 
 	let users = $state<User[]>([]);
 	let aliases = $state<Alias[]>([]);

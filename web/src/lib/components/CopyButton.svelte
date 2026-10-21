@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Icon from './Icon.svelte';
-	import { toast } from '$lib/toast.svelte';
+	import { toast } from '#lib/toast.svelte';
 
 	type Props = { value: string; label?: string };
 
