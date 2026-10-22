@@ -33,9 +33,7 @@ fmt:
 	gofmt -w cmd internal web
 
 image: build
-	docker build --build-arg VERSION=$(VERSION) \
-		-t $(IMAGE):$(VERSION) \
-		-t $(IMAGE):latest .
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
 
 db-status:
 	./$(BINARY) db status
