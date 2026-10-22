@@ -1,4 +1,5 @@
 BINARY  := lifemail
+IMAGE   ?= $(BINARY)
 GOARCH  ?= amd64
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
@@ -32,7 +33,9 @@ fmt:
 	gofmt -w cmd internal web
 
 image: build
-	docker build --build-arg VERSION=$(VERSION) -t $(BINARY):latest .
+	docker build --build-arg VERSION=$(VERSION) \
+		-t $(IMAGE):$(VERSION) \
+		-t $(IMAGE):latest .
 
 db-status:
 	./$(BINARY) db status

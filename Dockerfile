@@ -1,7 +1,7 @@
 # The binary is built on the host and copied into the image.
 #
 #   make build          # CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ... -o lifemail
-#   make image          # docker build -t lifemail:latest .
+#   make image          # docker build -t lifemail:$(VERSION) -t lifemail:latest .
 #
 # The container runs as root, so a bind-mounted /data does not need any
 # ownership changes on the host.
