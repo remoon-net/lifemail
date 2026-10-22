@@ -64,7 +64,7 @@ make build        # 前端构建 + 静态编译（只在需要产物时跑）
 
 ```bash
 go test ./internal/store/     # 单个包
-cd web && npm run check       # 只做前端类型检查
+cd web && pnpm run check        # 只做前端类型检查
 ```
 
 ## 4. 协议层
@@ -78,7 +78,7 @@ cd web && npm run check       # 只做前端类型检查
 
 - SvelteKit **3**：`#lib` 而不是 `$lib`；`tsconfig.json` 必须 `extends: "$app/tsconfig"`；
   `$app/paths` 只导出 `resolve` / `asset` / `base`；`$app/state` 提供 `page`。
-- 类型检查用 `cd web && npm run check`，不要靠 `vite build` 代替。
+- 类型检查用 `cd web && pnpm run check`，不要靠 `vite build` 代替。
 - 页面全部预渲染（`ssr = false`），数据通过 `/api/admin/*` 在客户端拉取。
 - UI 文案用中文，新增组件放 `web/src/lib/components/`，不要回到单文件大页面。
 

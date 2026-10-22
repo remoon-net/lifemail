@@ -39,7 +39,7 @@ EAS 真机行为与踩坑记录见 [docs/eas-notes.md](docs/eas-notes.md)。
 ## 快速开始
 
 ```bash
-# 1. 构建（前端构建后嵌入二进制；需要 Node 22+）
+# 1. 构建（前端构建后嵌入二进制；需要 Node 22+ 与 pnpm）
 make build
 
 # 2. 初始化数据库（serve 也会自动迁移，这一步可以省略）
@@ -228,9 +228,9 @@ make verify            # 收尾跑一次：gofmt + vet + svelte-check + 全量�
 make check             # 只做静态检查（gofmt + vet + svelte-check）
 
 cd web
-npm install
-npm run dev            # 另开终端运行 ./lifemail serve
-npm run build          # 输出到 web/build，供 go:embed 使用
+pnpm install
+pnpm run dev            # 另开终端运行 ./lifemail serve
+pnpm run build          # 输出到 web/build，供 go:embed 使用
 ```
 
 版本号由 `make build` 注入：`git describe --tags --always --dirty`。

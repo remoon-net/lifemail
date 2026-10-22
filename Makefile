@@ -7,7 +7,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 
 # Build the admin console into web/build, then embed it in the binary.
 web:
-	cd web && npm ci && npm run build
+	cd web && pnpm install --frozen-lockfile && pnpm run build
 
 build: web
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/lifemail
@@ -16,7 +16,7 @@ build: web
 check:
 	@test -z "$$(gofmt -l cmd internal web)" || (gofmt -l cmd internal web && exit 1)
 	go vet ./...
-	cd web && npm run check
+	cd web && pnpm run check
 
 test:
 	go test ./...
