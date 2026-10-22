@@ -206,12 +206,12 @@ attachments/out/01/1-<hash>.eml    ← 排队中的邮件
 
 ```bash
 make build        # 先构建前端，再交叉编译
-make image        # docker build -t lifemail:latest .
+make image        # docker build -t lifemail:$(git describe --tags --always)
 
 docker run -d --name lifemail -p 8080:8080 \
   --env-file .env \
   -v "$PWD/data:/data" \
-  lifemail:latest
+  "lifemail:$(git describe --tags --always)"
 ```
 
 ARM 服务器：`make build GOARCH=arm64 image`。
