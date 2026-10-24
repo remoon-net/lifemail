@@ -33,7 +33,7 @@ internal/
   submission/        SMTPS 465 提交
   smtp/              Cloudflare Email Sending 客户端
   ical/              只读日历订阅
-  api/               收信 API、/api/admin/*、/api/me/*、/metrics
+  api/               收信 API、/api/admin/*（含 metrics）、/api/me/*
   settings/          数据库中的运行时设置（域名、证书、SMTP）
   blobstore/         附件与 MIME 原文的文件存储
 web/                 SvelteKit 管理控制台（构建产物 go:embed）
@@ -41,19 +41,22 @@ deploy/              Cloudflare Email Worker
 docs/                架构与协议笔记
 ```
 
-请求入口（`cmd/lifemail/main.go`）：
+请求入口（`cmd/lifemail/routes.go`，单端口按路径区分，只划分接口）：
 
-| 路径 | 处理者 |
-|---|---|
-| `/Microsoft-Server-ActiveSync` | `eas.Server` |
-| `/autodiscover/autodiscover.xml` | `eas.Autodiscover` |
-| `/api/inbound` | `api.Inbound`（Bearer token） |
-| `/api/admin/*` | `api.Admin`（Bearer token 或会话 Cookie） |
-| `/api/me/*` | `api.Me`（邮箱密码 Basic Auth） |
-| `/calendar/<uuid>.ics` | `ical.Handler` |
-| `/admin/` | 嵌入的前端静态资源 |
-| `/healthz` `/readyz` | 存活 / 就绪（含 DB 探活） |
-| `/metrics` | Prometheus 文本（需 Admin Token） |
+| 路径 | 处理者 | 面 |
+|---|---|---|
+| `/Microsoft-Server-ActiveSync` | `eas.Server` | 公开 |
+| `/autodiscover/autodiscover.xml` | `eas.Autodiscover` | 公开 |
+| `/api/inbound` | `api.Inbound`（Bearer token） | 公开 |
+| `/api/me/*` | `api.Me`（邮箱密码 Basic Auth） | 公开 |
+| `/calendar/<uuid>.ics` | `ical.Handler` | 公开 |
+| `/healthz` `/readyz` | 存活 / 就绪（含 DB 探活） | 公开 |
+| `/api/admin/metrics` | Prometheus 文本（需 Admin Token） | 管理接口 |
+| `/api/admin/*` | `api.Admin`（Bearer token 或会话 Cookie） | 管理接口 |
+| `/admin/` | 嵌入的前端静态资源 | 静态文件，不划分 |
+
+客户端证书不由 Go 处理：反向代理在管理域名上做证书校验，
+公开域名直接 404 掉 `/api/admin/*`（见 README 的 Caddy 示例）。
 
 ---
 

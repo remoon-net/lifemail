@@ -37,7 +37,6 @@ import (
 	"remoon.net/lifemail/internal/smtp"
 	"remoon.net/lifemail/internal/store"
 	"remoon.net/lifemail/internal/submission"
-	webui "remoon.net/lifemail/web"
 )
 
 // version is set at build time with -X main.version=<git describe>.
@@ -122,6 +121,10 @@ and can be changed at runtime via GET/PUT /api/admin/settings.
 
 IMAPS/SMTPS use the per-domain certificate configured there and are only
 started when the corresponding flag is given.
+
+The admin API (/api/admin/*) shares the HTTP listener with the public endpoints.
+Publish it on a separate domain and restrict it there; client certificates are
+the reverse proxy's job. The console under /admin/ is static files.
 `)
 }
 
@@ -267,63 +270,28 @@ func runServer(cfg config.Config, opts serveOptions) {
 		}
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle("/Microsoft-Server-ActiveSync", easServer)
-	mux.Handle("/Microsoft-Server-ActiveSync/", easServer)
-	mux.Handle("/api/inbound", inbound)
-	mux.Handle("/api/admin/", admin)
-	// Read-only iCalendar subscription feeds. The UUID in the path is the
-	// credential; whether it resolves at all is the owner's per-calendar choice.
-	mux.Handle("/calendar/", ical.Handler{Store: st})
-	// The account owner's own calendar settings, authenticated with mailbox
-	// credentials.
-	mux.Handle("/api/me/", &api.Me{
-		Store:       st,
-		Log:         logger,
-		AuthLimiter: authlimit.New(authMaxFailures, authFailureWindow, authLockout),
-		BaseURL:     cfg.PublicBaseURL,
-	})
-	mux.Handle("/metrics", &api.Metrics{Store: st, Token: cfg.AdminToken, Version: version})
-	mux.Handle("/admin/", http.StripPrefix("/admin", webui.Handler()))
-	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin/", http.StatusMovedPermanently)
-	})
-	autodiscover := eas.Autodiscover()
-	mux.Handle("/autodiscover/autodiscover.xml", autodiscover)
-	mux.Handle("/Autodiscover/Autodiscover.xml", autodiscover)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok\n"))
-	})
-	// readyz additionally proves the database is reachable, so a load balancer
-	// does not send traffic to a process that lost its storage.
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-		if err := st.DB().PingContext(ctx); err != nil {
-			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ready\n"))
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.EqualFold(r.URL.Path, "/Microsoft-Server-ActiveSync"),
-			strings.EqualFold(r.URL.Path, "/Microsoft-Server-ActiveSync/"):
-			easServer.ServeHTTP(w, r)
-		case strings.EqualFold(r.URL.Path, "/autodiscover/autodiscover.xml"):
-			autodiscover.ServeHTTP(w, r)
-		case r.URL.Path == "/":
-			http.Redirect(w, r, "/admin/", http.StatusFound)
-		default:
-			http.NotFound(w, r)
-		}
-	})
+	handlers := routeDeps{
+		Store:        st,
+		EAS:          easServer,
+		Autodiscover: eas.Autodiscover(),
+		Inbound:      inbound,
+		Admin:        admin,
+		Me: &api.Me{
+			Store:       st,
+			Log:         logger,
+			AuthLimiter: authlimit.New(authMaxFailures, authFailureWindow, authLockout),
+			BaseURL:     cfg.PublicBaseURL,
+		},
+		// Read-only iCalendar subscription feeds. The UUID in the path is the
+		// credential; whether it resolves at all is the owner's per-calendar
+		// choice.
+		Calendar: ical.Handler{Store: st},
+		Metrics:  &api.Metrics{Store: st, Token: cfg.AdminToken, Version: version},
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           logRequests(logger, mux),
+		Handler:           logRequests(logger, newHTTPHandler(handlers)),
 		ReadHeaderTimeout: 15 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

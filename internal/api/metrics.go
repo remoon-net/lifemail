@@ -9,8 +9,9 @@ import (
 	"remoon.net/lifemail/internal/store"
 )
 
-// Metrics exposes a small Prometheus text endpoint. Scraping requires the
-// admin bearer token so the endpoint never leaks counts publicly.
+// Metrics exposes a small Prometheus text endpoint at /api/admin/metrics.
+// Scraping requires the admin bearer token so the endpoint never leaks counts
+// publicly.
 type Metrics struct {
 	Store   *store.Store
 	Token   string

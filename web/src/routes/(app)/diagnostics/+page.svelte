@@ -39,7 +39,7 @@
 		{ label: '日历订阅', value: '/calendar/{uuid}.ics', note: '只读 iCalendar' },
 		{ label: '健康检查', value: '/healthz', note: '存活' },
 		{ label: '就绪检查', value: '/readyz', note: '含数据库探活' },
-		{ label: '指标', value: '/metrics', note: 'Prometheus，需 Admin Token' }
+		{ label: '指标', value: '/api/admin/metrics', note: 'Prometheus，需 Admin Token' }
 	];
 </script>
 

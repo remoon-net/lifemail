@@ -31,6 +31,18 @@ flowchart LR
   api2 --> db
 ```
 
+只有**接口**分面，控制台静态文件不参与划分（`/admin/` 是 SvelteKit 产物，
+任何域名都可以直接取）：
+
+| 面 | 路径 |
+|---|---|
+| 用户 / 邮件协议 | `/Microsoft-Server-ActiveSync`、`/Autodiscover/*`、`/api/inbound`、`/api/me/*`、`/calendar/*`、`/healthz`、`/readyz` |
+| 管理接口 | `/api/admin/*`（含 `/api/admin/metrics`） |
+| 静态文件 | `/admin/*` |
+
+因此可以用两个域名指向同一个后端：公开域名拒绝 `/api/admin/*`，
+管理域名放行并在入口处启用客户端证书校验（见下文 Caddy 示例）。
+
 详细分层、表结构与同步模型见 [docs/architecture.md](docs/architecture.md)；
 EAS 真机行为与踩坑记录见 [docs/eas-notes.md](docs/eas-notes.md)。
 
@@ -63,11 +75,30 @@ set -a; . ./.env; set +a
 **必须放在 HTTPS 后面**：EAS 使用 HTTP Basic Auth，凭据只能通过 TLS 传输。
 
 ```caddyfile
+# 公开域名：邮件协议与用户接口。管理接口在这里直接拒绝。
 mail.example.com {
+    @adminApi path /api/admin/*
+    respond @adminApi 404
+
+    reverse_proxy 127.0.0.1:8080
+}
+
+# 管理域名：客户端证书校验在这一层完成，Go 进程只校验 Admin Token。
+admin.example.com {
+    tls {
+        client_auth {
+            mode require_and_verify
+            trusted_ca_cert_file /etc/caddy/admin-ca.pem
+        }
+    }
+
     reverse_proxy 127.0.0.1:8080
 }
 ```
 
+两个域名走同一个后端端口；除了上面两块之外不需要额外配置。
+控制台静态文件两个域名都能取，但公开域名上 `/api/admin/*` 是 404，
+所以请从管理域名打开 `/admin/`。
 没有公网 IP 时可以用 Cloudflare Tunnel 暴露服务。
 
 ---
@@ -118,7 +149,9 @@ LIFEMAIL_DB_DSN='postgres://lifemail:secret@db:5432/lifemail?sslmode=disable' ./
 
 ## 管理控制台
 
-打开 `https://mail.example.com/admin/`，输入 `LIFEMAIL_ADMIN_TOKEN`。
+打开管理域名下的 `/admin/`（例如 `https://admin.example.com/admin/`），
+输入 `LIFEMAIL_ADMIN_TOKEN`。控制台与 `/api/admin/*` 同源，Cookie 只在这个域名生效；
+公开域名上这些路径返回 404。
 
 | 页面 | 能做什么 |
 |---|---|
