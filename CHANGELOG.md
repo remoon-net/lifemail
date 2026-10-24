@@ -4,6 +4,12 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - 2026-10-24
+
+### Fixed
+
+- 控制台「设置 → 发送测试邮件」：按钮与输入框底部对齐，提示文字移到整行下方
+
 ## [0.1.0] - 2026-10-24
 
 ### Added

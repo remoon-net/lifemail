@@ -160,13 +160,16 @@
 						<input type="checkbox" bind:checked={clearPassword} class="h-4 w-4 rounded border-zinc-300" />
 						清除已保存的 Token
 					</label>
-					<div class="grid gap-3 border-t border-zinc-100 pt-3 sm:grid-cols-[1fr_auto] sm:items-end dark:border-zinc-800">
-						<Field label="测试收件地址" for="smtp-test" hint="用已保存的设置发一封测试邮件，未保存的修改不会生效">
-							<input id="smtp-test" class={input} type="email" bind:value={testTo} placeholder="you@example.net" />
-						</Field>
-						<Button variant="secondary" onclick={testSend} disabled={testing || !testTo.trim()}>
-							{testing ? '发送中…' : '发送测试邮件'}
-						</Button>
+					<div class="border-t border-zinc-100 pt-3 dark:border-zinc-800">
+						<div class="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+							<Field label="测试收件地址" for="smtp-test">
+								<input id="smtp-test" class={input} type="email" bind:value={testTo} placeholder="you@example.net" />
+							</Field>
+							<Button variant="secondary" onclick={testSend} disabled={testing || !testTo.trim()}>
+								{testing ? '发送中…' : '发送测试邮件'}
+							</Button>
+						</div>
+						<p class="muted mt-1.5 text-xs">用已保存的设置发一封测试邮件，未保存的修改不会生效</p>
 					</div>
 					<div class="flex items-center justify-between gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
 						<Badge tone={passwordSet ? 'ok' : 'danger'}>{passwordSet ? '投递就绪' : '未配置'}</Badge>
