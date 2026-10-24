@@ -124,3 +124,58 @@ func TestLegacyDomainList(t *testing.T) {
 		t.Fatalf("names = %#v", names)
 	}
 }
+
+func TestCatchAllRules(t *testing.T) {
+	s, db := newTestStore(t)
+
+	domains := []Domain{{Name: "Example.com"}}
+	catch := map[string]string{"@Example.COM.": " Archive@Example.NET "}
+	cfg, err := s.Update(Patch{Domains: &domains, CatchAll: &catch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dest, ok := cfg.CatchAllFor("example.com"); !ok || dest != "archive@example.net" {
+		t.Fatalf("catch-all = %q %v", dest, ok)
+	}
+
+	// Snapshots must not alias the cached map.
+	snap := s.Snapshot()
+	snap.CatchAll["example.com"] = "mutated@example.net"
+	if dest, _ := s.Snapshot().CatchAllFor("example.com"); dest != "archive@example.net" {
+		t.Fatalf("snapshot aliases cached map: %q", dest)
+	}
+
+	reloaded, err := New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dest, ok := reloaded.Snapshot().CatchAllFor("example.com"); !ok || dest != "archive@example.net" {
+		t.Fatalf("reloaded catch-all = %q %v", dest, ok)
+	}
+
+	// A malformed destination is rejected.
+	bad := map[string]string{"example.com": "not-an-address"}
+	if _, err := s.Update(Patch{CatchAll: &bad}); err == nil {
+		t.Fatal("expected invalid destination error")
+	}
+	// Forwarding back into a configured domain would loop through inbound.
+	loop := map[string]string{"example.com": "someone@example.com"}
+	if _, err := s.Update(Patch{CatchAll: &loop}); err == nil {
+		t.Fatal("expected local destination error")
+	}
+	// Domains outside the configured list are typos, not rules.
+	other := map[string]string{"other.net": "box@example.net"}
+	if _, err := s.Update(Patch{CatchAll: &other}); err == nil {
+		t.Fatal("expected unknown domain error")
+	}
+
+	// An empty destination removes the rule.
+	clear := map[string]string{"example.com": "  "}
+	cfg, err = s.Update(Patch{CatchAll: &clear})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.CatchAllFor("example.com"); ok {
+		t.Fatal("rule was not cleared")
+	}
+}

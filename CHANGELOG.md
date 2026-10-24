@@ -4,6 +4,24 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.0] - 2026-10-24
+
+### Added
+
+- **收信**
+  - 按域名的兜底转发（`mail.catchall`）：本地不存在的收件人同步转发到外部地址，
+    控制台「设置 → 兜底转发」可维护
+  - 同一个请求内任一收件人无法解析时整封拒绝，避免重试造成部分收件人重复收信
+- **管理控制台**
+  - 「设置」页新增「发送测试邮件」：`POST /api/admin/smtp/test` 用已保存的 SMTP
+    配置同步发送，失败时直接返回错误信息
+
+### Changed
+
+- `POST /api/inbound` 对未知收件人的处理：没配兜底时返回 `550`（Worker 永久退信），
+  转发失败返回 `502`，不再静默标记为 `skipped`
+- `deploy/cloudflare-worker.js` 遇到 `550` 调用 `message.setReject`，其余错误继续抛出让 Cloudflare 重试
+
 ## [0.0.1] - 2026-10-22
 
 首个可部署版本：单二进制同时提供 Exchange ActiveSync、IMAPS、SMTPS、收信 API

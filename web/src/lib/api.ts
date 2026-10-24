@@ -76,6 +76,8 @@ export const api = {
 
 	settings: () => request<Settings>('/settings'),
 	saveSettings: (body: unknown) => request<Settings>('/settings', { method: 'PUT', ...json(body) }),
+	testSmtp: (to: string) =>
+		request<{ ok: boolean; to: string }>('/smtp/test', { method: 'POST', ...json({ to }) }),
 
 	users: () => request<{ users: User[] }>('/users'),
 	createUser: (body: { name: string; address: string; display_name: string }) =>

@@ -162,7 +162,7 @@ LIFEMAIL_DB_DSN='postgres://lifemail:secret@db:5432/lifemail?sslmode=disable' ./
 | 发件队列 | 5 秒自动刷新、按状态过滤、单条重试/放弃 |
 | 设备 | 已配对的 ActiveSync 客户端，远程擦除 / 移除，清理变更记录 |
 | 日历订阅 | 每个日历的公开开关与订阅链接 |
-| 设置 | SMTP 主机、端口、Token、兜底 From |
+| 设置 | SMTP 主机、端口、Token、兜底 From；发送测试邮件；按域名的兜底转发 |
 | 诊断 | 版本、数据库方言、迁移记录、服务端点、排查提示 |
 
 界面支持浅色/深色主题、移动端抽屉导航；所有写操作都有确认弹窗与结果提示。
@@ -189,6 +189,7 @@ LIFEMAIL_DB_DSN='postgres://lifemail:secret@db:5432/lifemail?sslmode=disable' ./
 2. 创建 API Token，权限选 **Email Sending: Edit**
 3. 控制台「设置」里填入 Token（`smtp.username` 保持 `api_token`）
 4. 在「域名与证书」里加上发件域名
+5. 保存后用同一页的「发送测试邮件」验证（`POST /api/admin/smtp/test`，同步发送并直接返回错误）
 
 Cloudflare 的硬限制：只支持 `465` 隐式 TLS；`MAIL FROM` 必须属于已 onboard 的域名；
 单封邮件最大 **5 MiB**，单次会话最多 **50 个收件人**。
@@ -215,7 +216,13 @@ API 行为：
 - `POST /api/inbound`，`Authorization: Bearer <token>` 或 `X-Lifemail-Token`
 - 支持原始 MIME，也支持 JSON `{"to":["a@x"],"raw":"<base64>"}`
 - 收件人解析：主地址/别名 → plus 地址（`alice+tag@example.com`）
-- 同一 `Message-ID` 重复投递自动去重；未知收件人返回 `skipped`
+- 同一 `Message-ID` 重复投递自动去重；命中本地账号的收件人返回 `delivered`
+- 未知收件人按「设置 → 兜底转发」的域名规则**同步转发**到外部地址，返回 `forwarded`
+- 没有任何兜底规则的未知收件人返回 `550`（Worker 调用 `setReject` 永久退信）；
+  转发失败返回 `502`、存储失败返回 `500`，Worker 抛错让 Cloudflare 重试
+
+兜底转发只在收信请求内完成，不写入本地邮箱：目标地址收到的是原始 MIME，
+信封发件人使用被兜底的地址（都在已配置域名内）。
 
 ---
 

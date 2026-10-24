@@ -35,6 +35,15 @@ export default {
 
     if (!response.ok) {
       const detail = await response.text();
+      // 550 means lifemail cannot route the recipient at all (unknown address
+      // and no catch-all configured). Rejecting permanently makes the sending
+      // MTA bounce immediately instead of retrying for days.
+      if (response.status === 550) {
+        message.setReject(detail || "unknown recipient");
+        return;
+      }
+      // Everything else (5xx storage/forward failures) is transient: throwing
+      // makes Cloudflare report a temporary failure so the sender retries.
       throw new Error(`lifemail rejected message: ${response.status} ${detail}`);
     }
   },

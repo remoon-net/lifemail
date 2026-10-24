@@ -213,13 +213,15 @@ func runServer(cfg config.Config, opts serveOptions) {
 		easServer.OofReply(user, parsed, raw)
 	}
 	mailAuthLimiter := authlimit.New(authMaxFailures, authFailureWindow, authLockout)
-	inbound := &api.Inbound{Store: st, Token: cfg.InboundToken, Log: logger}
+	inbound := &api.Inbound{Store: st, Token: cfg.InboundToken, Log: logger,
+		Settings: runtimeSettings, Sender: sender}
 	if cfg.InboundToken == "" {
 		logger.Warn("LIFEMAIL_INBOUND_TOKEN is empty; /api/inbound rejects all requests")
 	}
 
 	admin := &api.Admin{Store: st, Settings: runtimeSettings, Token: cfg.AdminToken,
 		Version: version, Log: logger, BaseURL: cfg.PublicBaseURL,
+		Sender:      sender,
 		AuthLimiter: authlimit.New(authMaxFailures, authFailureWindow, authLockout)}
 	if cfg.AdminToken == "" {
 		logger.Warn("/api/admin is disabled: set LIFEMAIL_ADMIN_TOKEN (the inbound token is not reused)")

@@ -34,6 +34,8 @@ export interface Smtp {
 
 export interface Settings {
 	domains: Domain[];
+	/** domain → fallback destination for recipients that do not exist locally */
+	catchall: Record<string, string>;
 	smtp: Smtp;
 }
 

@@ -19,6 +19,7 @@ import (
 // Setting keys.
 const (
 	KeyDomains      = "mail.domains"
+	KeyCatchAll     = "mail.catchall"
 	KeySMTPHost     = "smtp.host"
 	KeySMTPPort     = "smtp.port"
 	KeySMTPUsername = "smtp.username"
@@ -46,12 +47,24 @@ type Domain struct {
 
 // Config is an immutable snapshot of the runtime settings.
 type Config struct {
-	Domains      []Domain
+	Domains []Domain
+	// CatchAll maps a domain to the address that receives mail for unknown
+	// recipients at that domain. Keys are lowercase domain names.
+	CatchAll     map[string]string
 	SMTPHost     string
 	SMTPPort     int
 	SMTPUser     string
 	SMTPPassword string
 	SMTPFrom     string
+}
+
+// CatchAllFor returns the fallback destination configured for a domain.
+func (c Config) CatchAllFor(domain string) (string, bool) {
+	if len(c.CatchAll) == 0 {
+		return "", false
+	}
+	dest, ok := c.CatchAll[strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))]
+	return dest, ok && dest != ""
 }
 
 // DomainNames returns just the configured domain names.
@@ -66,6 +79,7 @@ func (c Config) DomainNames() []string {
 // Patch updates only the fields that are non-nil.
 type Patch struct {
 	Domains      *[]Domain
+	CatchAll     *map[string]string
 	SMTPHost     *string
 	SMTPPort     *int
 	SMTPUser     *string
@@ -135,6 +149,7 @@ func (s *Store) Reload() error {
 	}
 	cfg := Config{
 		Domains:      decodeDomains(raw[KeyDomains]),
+		CatchAll:     decodeCatchAll(raw[KeyCatchAll]),
 		SMTPHost:     host,
 		SMTPPort:     port,
 		SMTPUser:     username,
@@ -157,6 +172,12 @@ func (s *Store) Snapshot() Config {
 	defer s.mu.RUnlock()
 	cfg := s.cfg
 	cfg.Domains = append([]Domain(nil), s.cfg.Domains...)
+	if s.cfg.CatchAll != nil {
+		cfg.CatchAll = make(map[string]string, len(s.cfg.CatchAll))
+		for domain, dest := range s.cfg.CatchAll {
+			cfg.CatchAll[domain] = dest
+		}
+	}
 	return cfg
 }
 
@@ -214,6 +235,17 @@ func (s *Store) Update(p Patch) (Config, error) {
 			return Config{}, err
 		}
 		values[KeyDomains] = encodeDomains(domains)
+	}
+	if p.CatchAll != nil {
+		domains := s.Snapshot().Domains
+		if p.Domains != nil {
+			domains = NormalizeDomains(*p.Domains)
+		}
+		catchAll, err := normalizeCatchAll(*p.CatchAll, domains)
+		if err != nil {
+			return Config{}, err
+		}
+		values[KeyCatchAll] = encodeCatchAll(catchAll)
 	}
 	if p.SMTPHost != nil {
 		host := strings.TrimSpace(*p.SMTPHost)
@@ -344,4 +376,75 @@ func decodeDomains(raw string) []Domain {
 	}
 	// Backwards compatibility with the old comma separated list.
 	return NormalizeDomains([]Domain{{Name: raw}})
+}
+
+// normalizeCatchAll validates per-domain fallback destinations. An empty
+// destination removes the rule, which keeps "clear the input and save" working.
+// Destinations on a configured domain are rejected: forwarding to ourselves
+// would loop through the inbound endpoint forever.
+func normalizeCatchAll(input map[string]string, domains []Domain) (map[string]string, error) {
+	local := make(map[string]bool, len(domains))
+	for _, d := range domains {
+		local[strings.ToLower(d.Name)] = true
+	}
+	out := make(map[string]string, len(input))
+	for domain, dest := range input {
+		name := strings.ToLower(strings.TrimSuffix(
+			strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(domain), "@")), "."))
+		if name == "" {
+			return nil, errors.New("catch-all domain must not be empty")
+		}
+		if len(local) > 0 && !local[name] {
+			return nil, fmt.Errorf("catch-all domain %s is not configured", name)
+		}
+		dest = strings.TrimSpace(dest)
+		if dest == "" {
+			continue
+		}
+		addr, err := mail.ParseAddress(dest)
+		if err != nil {
+			return nil, fmt.Errorf("invalid catch-all destination for %s: %w", name, err)
+		}
+		target := strings.ToLower(addr.Address)
+		at := strings.LastIndex(target, "@")
+		if at < 1 || local[target[at+1:]] {
+			return nil, fmt.Errorf("catch-all destination for %s must be an external address", name)
+		}
+		out[name] = target
+	}
+	return out, nil
+}
+
+func encodeCatchAll(rules map[string]string) string {
+	if len(rules) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(rules)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func decodeCatchAll(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var rules map[string]string
+	if err := json.Unmarshal([]byte(raw), &rules); err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(rules))
+	for domain, dest := range rules {
+		name := strings.ToLower(strings.TrimSpace(domain))
+		if name == "" || strings.TrimSpace(dest) == "" {
+			continue
+		}
+		out[name] = strings.ToLower(strings.TrimSpace(dest))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

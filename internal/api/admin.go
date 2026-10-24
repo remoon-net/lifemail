@@ -34,6 +34,10 @@ type Admin struct {
 	Version  string
 	Log      *slog.Logger
 
+	// Sender delivers the console's test message. Optional; without it the
+	// test endpoint reports that SMTP is not configured.
+	Sender MessageSender
+
 	// AuthLimiter throttles repeated bad tokens. Optional.
 	AuthLimiter *authlimit.Limiter
 
@@ -76,8 +80,9 @@ func (d *adminDomain) UnmarshalJSON(data []byte) error {
 }
 
 type adminView struct {
-	Domains []adminDomain `json:"domains"`
-	SMTP    adminSMTPView `json:"smtp"`
+	Domains  []adminDomain     `json:"domains"`
+	CatchAll map[string]string `json:"catchall"`
+	SMTP     adminSMTPView     `json:"smtp"`
 }
 
 type adminSMTPPatch struct {
@@ -89,8 +94,9 @@ type adminSMTPPatch struct {
 }
 
 type adminPatch struct {
-	Domains *[]adminDomain  `json:"domains"`
-	SMTP    *adminSMTPPatch `json:"smtp"`
+	Domains  *[]adminDomain     `json:"domains"`
+	CatchAll *map[string]string `json:"catchall"`
+	SMTP     *adminSMTPPatch    `json:"smtp"`
 }
 
 // ServeHTTP routes /api/admin/* requests.
@@ -107,6 +113,8 @@ func (h *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.session(w, r)
 	case "/api/admin/settings":
 		h.settings(w, r)
+	case "/api/admin/smtp/test":
+		h.testSMTP(w, r)
 	case "/api/admin/stats":
 		h.stats(w, r)
 	case "/api/admin/migrations":
@@ -267,6 +275,7 @@ func (h *Admin) settings(w http.ResponseWriter, r *http.Request) {
 			patch.SMTPPassword = body.SMTP.Password
 			patch.SMTPFrom = body.SMTP.From
 		}
+		patch.CatchAll = body.CatchAll
 		cfg, err := h.Settings.Update(patch)
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -292,8 +301,13 @@ func (h *Admin) writeSettings(w http.ResponseWriter, status int, cfg settings.Co
 			TLSKey:  d.TLSKey,
 		})
 	}
+	catchAll := make(map[string]string, len(cfg.CatchAll))
+	for domain, dest := range cfg.CatchAll {
+		catchAll[domain] = dest
+	}
 	view := adminView{
-		Domains: domains,
+		Domains:  domains,
+		CatchAll: catchAll,
 		SMTP: adminSMTPView{
 			Host:        cfg.SMTPHost,
 			Port:        cfg.SMTPPort,
