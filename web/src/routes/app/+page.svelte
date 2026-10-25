@@ -293,19 +293,6 @@
 		recipientsOpen = false;
 	}
 
-	function replyToSender() {
-		const sender = replyTarget?.to[0];
-		if (!sender) return;
-		replyTo = sender;
-		replyCc = '';
-	}
-
-	function replyToEveryone() {
-		if (!replyTarget) return;
-		replyTo = joinAddresses(replyTarget.to ?? []);
-		replyCc = joinAddresses(replyTarget.cc ?? []);
-	}
-
 	async function sendReply() {
 		if (!replyTarget || !replyBody.trim() || replyBusy) return;
 		if (toList.length === 0) {
@@ -691,23 +678,24 @@
 							<Icon name="edit" size={11} class="shrink-0 opacity-60" />
 						</button>
 						<div class="ml-auto flex shrink-0 items-center gap-1">
-							<Button variant="ghost" size="sm" onclick={replyToSender}>仅发件人</Button>
-							<Button variant="ghost" size="sm" onclick={replyToEveryone}>全部回复</Button>
+							<Button
+								size="sm"
+								class="ml-0.5"
+								onclick={sendReply}
+								disabled={replyBusy || !replyBody.trim()}
+							>
+								{replyBusy ? '发送中…' : '发送'}
+							</Button>
 						</div>
 					</div>
-					<div class="flex items-end gap-2">
-						<textarea
-							class="{textarea} max-h-40 min-h-11 flex-1 resize-none text-[13px]"
-							rows="2"
-							bind:value={replyBody}
-							disabled={replyBusy}
-							placeholder="写点什么…"
-							onkeydown={onReplyKeydown}
-						></textarea>
-						<Button size="sm" onclick={sendReply} disabled={replyBusy || !replyBody.trim()}>
-							{replyBusy ? '发送中…' : '发送'}
-						</Button>
-					</div>
+					<textarea
+						class="{textarea} max-h-40 min-h-11 w-full resize-none text-[13px]"
+						rows="2"
+						bind:value={replyBody}
+						disabled={replyBusy}
+						placeholder="写点什么…"
+						onkeydown={onReplyKeydown}
+					></textarea>
 					<p class="muted mt-1 text-[10px]">
 						Enter 发送 · Shift+Enter 换行 · 主题 {replyTarget.subject}
 					</p>
