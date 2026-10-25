@@ -41,7 +41,8 @@ export const icons = {
 	arrowLeft: '<path d="M19 12H5"/><path d="m11 18-6-6 6-6"/>',
 	paperclip:
 		'<path d="M21.4 11.5 12.6 20a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8.5-8.5"/>',
-	download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>'
+	download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>',
+	eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>'
 };
 
 export type IconName = keyof typeof icons;

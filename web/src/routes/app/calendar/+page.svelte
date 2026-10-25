@@ -48,6 +48,8 @@
 		end: ''
 	});
 
+	let readOnly = $derived(Boolean(editing?.recurring));
+
 	let selected = $derived(calendars.find((c) => c.id === selectedId) ?? null);
 
 	function pad(value: number): string {
@@ -245,7 +247,7 @@
 
 	async function submitEvent(event: SubmitEvent) {
 		event.preventDefault();
-		if (!selectedId) return;
+		if (readOnly || !selectedId) return;
 		const subject = eventDraft.subject.trim();
 		if (!subject) return;
 
@@ -298,7 +300,7 @@
 	}
 
 	async function deleteEvent() {
-		if (!editing || !selectedId) return;
+		if (readOnly || !editing || !selectedId) return;
 		if (!window.confirm(`删除事件“${editing.subject || '(无主题)'}”？`)) return;
 		eventBusy = true;
 		try {
@@ -434,12 +436,16 @@
 												type="button"
 												class="flex w-full gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/30 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-brand-500/40 dark:hover:bg-brand-500/5"
 												onclick={() => openEditEvent(event)}
+												title={event.recurring ? '查看重复事件' : '编辑事件'}
 											>
 												<span class="mt-1.5 h-4 w-0.5 shrink-0 rounded bg-brand-500"></span>
 												<span class="min-w-0 flex-1">
 													<span class="flex flex-wrap items-center gap-2">
 														<span class="text-[13px] font-medium">{event.subject || '(无主题)'}</span>
-														{#if event.recurring}<Badge tone="brand">重复</Badge>{/if}
+														{#if event.recurring}
+															<Badge tone="brand">重复</Badge>
+															<span class="muted text-[10px]">客户端编辑</span>
+														{/if}
 													</span>
 													<span class="muted mt-0.5 block text-[11px]">{timeRange(event)}</span>
 													{#if event.location}
@@ -453,7 +459,7 @@
 														</span>
 													{/if}
 												</span>
-												<Icon name="edit" size={13} class="mt-1 shrink-0 text-zinc-300" />
+												<Icon name={event.recurring ? 'eye' : 'edit'} size={13} class="mt-1 shrink-0 text-zinc-300" />
 											</button>
 										</li>
 									{/each}
@@ -497,12 +503,22 @@
 
 <Modal
 	open={eventModal}
-	title={editing ? '编辑事件' : '新建事件'}
-	description={editing?.recurring ? '这是重复事件，修改会影响整组事件。' : '事件会同步到所有 ActiveSync 客户端。'}
+	title={editing?.recurring ? '查看重复事件' : editing ? '编辑事件' : '新建事件'}
+	description={editing?.recurring
+		? '重复事件的规则与单次实例由 ActiveSync 客户端管理。'
+		: '事件会同步到所有 ActiveSync 客户端。'}
 	onclose={() => (eventModal = false)}
 	width="max-w-xl"
 >
 	<form id="event-form" class="space-y-3" onsubmit={submitEvent}>
+		{#if readOnly}
+			<div
+				class="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+			>
+				<Icon name="alert" size={14} class="mt-0.5 shrink-0" />
+				<span>这是重复事件，请在 ActiveSync 客户端中编辑；此处仅可查看。</span>
+			</div>
+		{/if}
 		<Field label="标题" for="event-subject">
 			<input
 				id="event-subject"
@@ -510,6 +526,7 @@
 				bind:value={eventDraft.subject}
 				placeholder="例如：产品评审"
 				maxlength="255"
+				readonly={readOnly}
 				required
 			/>
 		</Field>
@@ -519,6 +536,7 @@
 				type="checkbox"
 				class="h-4 w-4 rounded border-zinc-300 text-brand-600 focus:ring-brand-500/30 dark:border-zinc-600 dark:bg-zinc-900"
 				checked={eventDraft.allDay}
+				disabled={readOnly}
 				onchange={(e) => setAllDay(e.currentTarget.checked)}
 			/>
 			全天事件
@@ -531,6 +549,7 @@
 					class={input}
 					type={eventDraft.allDay ? 'date' : 'datetime-local'}
 					bind:value={eventDraft.start}
+					readonly={readOnly}
 					required
 				/>
 			</Field>
@@ -540,28 +559,45 @@
 					class={input}
 					type={eventDraft.allDay ? 'date' : 'datetime-local'}
 					bind:value={eventDraft.end}
+					readonly={readOnly}
 					required
 				/>
 			</Field>
 		</div>
 
 		<Field label="地点" for="event-location">
-			<input id="event-location" class={input} bind:value={eventDraft.location} maxlength="255" />
+			<input
+				id="event-location"
+				class={input}
+				bind:value={eventDraft.location}
+				maxlength="255"
+				readonly={readOnly}
+			/>
 		</Field>
 
 		<Field label="备注" for="event-body">
-			<textarea id="event-body" class={textarea} rows="3" bind:value={eventDraft.body}></textarea>
+			<textarea
+				id="event-body"
+				class={textarea}
+				rows="3"
+				bind:value={eventDraft.body}
+				readonly={readOnly}
+			></textarea>
 		</Field>
 	</form>
 	{#snippet footer()}
-		{#if editing}
-			<Button variant="danger" size="sm" class="mr-auto" onclick={deleteEvent} disabled={eventBusy}>
-				<Icon name="trash" size={13} />删除
+		{#if readOnly}
+			<Button variant="secondary" size="sm" onclick={() => (eventModal = false)}>关闭</Button>
+		{:else}
+			{#if editing}
+				<Button variant="danger" size="sm" class="mr-auto" onclick={deleteEvent} disabled={eventBusy}>
+					<Icon name="trash" size={13} />删除
+				</Button>
+			{/if}
+			<Button variant="secondary" size="sm" onclick={() => (eventModal = false)}>取消</Button>
+			<Button type="submit" size="sm" form="event-form" disabled={eventBusy}>
+				{editing ? '保存' : '创建'}
 			</Button>
 		{/if}
-		<Button variant="secondary" size="sm" onclick={() => (eventModal = false)}>取消</Button>
-		<Button type="submit" size="sm" form="event-form" disabled={eventBusy}>
-			{editing ? '保存' : '创建'}
-		</Button>
 	{/snippet}
 </Modal>
