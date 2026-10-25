@@ -20,8 +20,9 @@ export default defineConfig({
 				strict: true
 			}),
 			paths: {
-				// Served by the Go binary under /admin/.
-				base: '/admin'
+				// The Go binary serves this build from the site root; the operator
+				// console lives under /admin and the account UI under /app.
+				base: ''
 			},
 			prerender: {
 				entries: ['*']

@@ -14,7 +14,7 @@
 		void session.boot();
 		const onUnauthorized = () => {
 			session.markUnauthenticated();
-			void goto((resolve as (path: string) => string)('/login') + '/');
+			void goto((resolve as (path: string) => string)('/admin/login') + '/');
 		};
 		window.addEventListener('lifemail:unauthorized', onUnauthorized);
 		return () => window.removeEventListener('lifemail:unauthorized', onUnauthorized);

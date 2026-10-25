@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	const base = (resolve as (path: string) => string)('/').replace(/\/$/, '');
+	const base = (resolve as (path: string) => string)('/admin');
 	import Button from '#lib/components/Button.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Icon from '#lib/components/Icon.svelte';

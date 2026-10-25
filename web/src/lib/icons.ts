@@ -37,7 +37,11 @@ export const icons = {
 		'<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
 	menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
 	star: '<path d="M12 3.6l2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.8l5.9-.8Z"/>',
-	arrowRight: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>'
+	arrowRight: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>',
+	arrowLeft: '<path d="M19 12H5"/><path d="m11 18-6-6 6-6"/>',
+	paperclip:
+		'<path d="M21.4 11.5 12.6 20a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8.5-8.5"/>',
+	download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>'
 };
 
 export type IconName = keyof typeof icons;

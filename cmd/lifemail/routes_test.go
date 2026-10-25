@@ -21,6 +21,7 @@ func stubRouteDeps() routeDeps {
 		Inbound:      stub("inbound"),
 		Admin:        stub("admin"),
 		Me:           stub("me"),
+		User:         stub("user"),
 		Calendar:     stub("calendar"),
 		Metrics:      stub("metrics"),
 	}
@@ -37,6 +38,8 @@ func TestHandlerRoutesByPath(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/admin/session", "admin", http.StatusOK},
 		{http.MethodGet, "/api/me/calendars/", "me", http.StatusOK},
+		{http.MethodGet, "/api/user/session", "user", http.StatusOK},
+		{http.MethodGet, "/api/user/mail/folders", "user", http.StatusOK},
 		{http.MethodPost, "/api/inbound", "inbound", http.StatusOK},
 		{http.MethodGet, "/Microsoft-Server-ActiveSync", "eas", http.StatusOK},
 		{http.MethodGet, "/microsoft-server-activesync", "eas", http.StatusOK},
@@ -46,6 +49,7 @@ func TestHandlerRoutesByPath(t *testing.T) {
 		{http.MethodGet, "/api/admin/metrics", "metrics", http.StatusOK},
 		{http.MethodGet, "/healthz", "ok\n", http.StatusOK},
 		{http.MethodGet, "/nope", "", http.StatusNotFound},
+		{http.MethodGet, "/api/nope", "", http.StatusNotFound},
 	}
 	for _, tc := range tests {
 		rec := httptest.NewRecorder()
@@ -73,17 +77,31 @@ func TestHandlerDoesNotWidenAdminPrefix(t *testing.T) {
 	}
 }
 
-// The console lives under /admin/ and is served from the embedded build.
-func TestHandlerServesConsole(t *testing.T) {
-	if _, err := os.Stat("../../web/build/index.html"); err != nil {
+// The site root sends visitors to the account UI.
+func TestHandlerRedirectsRootToApp(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newHTTPHandler(stubRouteDeps()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("GET /: status %d, want 302", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != "/app/" {
+		t.Fatalf("GET /: Location %q, want /app/", got)
+	}
+}
+
+// Both UI trees are prerendered directories in the embedded build.
+func TestHandlerServesUI(t *testing.T) {
+	if _, err := os.Stat("../../web/build/admin/index.html"); err != nil {
 		t.Skip("web/build is not present; run make web")
 	}
-	rec := httptest.NewRecorder()
-	newHTTPHandler(stubRouteDeps()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /admin/: status %d, want 200", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "<!doctype html>") {
-		t.Fatalf("GET /admin/: unexpected body %q", rec.Body.String())
+	for _, path := range []string{"/admin/", "/app/"} {
+		rec := httptest.NewRecorder()
+		newHTTPHandler(stubRouteDeps()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status %d, want 200", path, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "<!doctype html>") {
+			t.Fatalf("GET %s: unexpected body %q", path, rec.Body.String())
+		}
 	}
 }

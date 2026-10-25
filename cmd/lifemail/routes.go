@@ -20,18 +20,19 @@ type routeDeps struct {
 	Inbound      http.Handler
 	Admin        http.Handler
 	Me           http.Handler
+	User         http.Handler
 	Calendar     http.Handler
 	Metrics      http.Handler
 }
 
 // newHTTPHandler mounts both surfaces on one listener. Only the API is split
-// by path; the console is static files and is served for every host. A reverse
-// proxy can therefore publish the two surfaces on separate domains:
+// by path; the console and the account UI are static files served from the
+// same build. A reverse proxy can therefore publish the two surfaces on
+// separate domains:
 //
 //	public  /Microsoft-Server-ActiveSync, /Autodiscover/*, /api/inbound,
-//	        /api/me/*, /calendar/*, /healthz, /readyz
-//	admin   /api/admin/* (including /api/admin/metrics)
-//	static  /admin/*
+//	        /api/me/*, /api/user/*, /calendar/*, /healthz, /readyz, /app/*
+//	admin   /api/admin/* (including /api/admin/metrics), /admin/*
 //
 // Certificates are not handled here: put /api/admin/* behind
 // client-certificate verification in the proxy (see the Caddyfile example).
@@ -44,6 +45,7 @@ func newHTTPHandler(d routeDeps) http.Handler {
 	mux.Handle("/Microsoft-Server-ActiveSync/", d.EAS)
 	mux.Handle("/api/inbound", d.Inbound)
 	mux.Handle("/api/me/", d.Me)
+	mux.Handle("/api/user/", d.User)
 	mux.Handle("/calendar/", d.Calendar)
 	mux.Handle("/autodiscover/autodiscover.xml", d.Autodiscover)
 	mux.Handle("/Autodiscover/Autodiscover.xml", d.Autodiscover)
@@ -52,13 +54,16 @@ func newHTTPHandler(d routeDeps) http.Handler {
 	// files and carries no privileges of its own.
 	mux.Handle("/api/admin/metrics", d.Metrics)
 	mux.Handle("/api/admin/", d.Admin)
-	mux.Handle("/admin/", adminConsole())
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusMovedPermanently)
 	})
 
 	registerHealth(mux, d.Store)
 
+	// Everything else is the embedded UI: /admin/* is the operator console and
+	// /app/* is the account UI; both are prerendered directories in the same
+	// build.
+	console := webConsole()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.EqualFold(r.URL.Path, "/Microsoft-Server-ActiveSync"),
@@ -67,18 +72,18 @@ func newHTTPHandler(d routeDeps) http.Handler {
 		case strings.EqualFold(r.URL.Path, "/autodiscover/autodiscover.xml"):
 			d.Autodiscover.ServeHTTP(w, r)
 		case r.URL.Path == "/":
-			http.Redirect(w, r, "/admin/", http.StatusFound)
+			http.Redirect(w, r, "/app/", http.StatusFound)
 		default:
-			http.NotFound(w, r)
+			console.ServeHTTP(w, r)
 		}
 	})
 	return mux
 }
 
-// adminConsole serves the embedded SvelteKit console, built with
-// paths.base = "/admin".
-func adminConsole() http.Handler {
-	return http.StripPrefix("/admin", webui.Handler())
+// webConsole serves the embedded SvelteKit build. It contains /admin/*, the
+// operator console, and /app/*, the account UI.
+func webConsole() http.Handler {
+	return webui.Handler()
 }
 
 func registerHealth(mux *http.ServeMux, st *store.Store) {

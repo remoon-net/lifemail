@@ -284,6 +284,17 @@ func runServer(cfg config.Config, opts serveOptions) {
 			AuthLimiter: authlimit.New(authMaxFailures, authFailureWindow, authLockout),
 			BaseURL:     cfg.PublicBaseURL,
 		},
+		// The account UI. It signs its own cookie with a key derived from the
+		// admin token, so webmail login is unavailable when that token is
+		// unset (the Basic-auth /api/me surface keeps working).
+		User: &api.User{
+			Store:       st,
+			Log:         logger,
+			Token:       cfg.AdminToken,
+			AuthLimiter: authlimit.New(authMaxFailures, authFailureWindow, authLockout),
+			BaseURL:     cfg.PublicBaseURL,
+			Version:     version,
+		},
 		// Read-only iCalendar subscription feeds. The UUID in the path is the
 		// credential; whether it resolves at all is the owner's per-calendar
 		// choice.

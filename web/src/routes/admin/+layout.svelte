@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	const base = (resolve as (path: string) => string)('/').replace(/\/$/, '');
+	const base = (resolve as (path: string) => string)('/admin');
 	import { page } from '$app/state';
 	import Icon from '#lib/components/Icon.svelte';
 	import Skeleton from '#lib/components/Skeleton.svelte';

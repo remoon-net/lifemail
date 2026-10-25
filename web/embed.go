@@ -1,4 +1,4 @@
-// Package webui serves the embedded admin interface.
+// Package webui serves the embedded SvelteKit build.
 package webui
 
 import (
@@ -13,8 +13,8 @@ import (
 //go:embed all:build
 var assets embed.FS
 
-// Handler serves the admin UI. Mount it with http.StripPrefix("/admin", ...)
-// on the /admin/ pattern.
+// Handler serves the UI build from the site root. It contains two prerendered
+// trees: /admin/* (operator console) and /app/* (account UI).
 func Handler() http.Handler {
 	sub, err := fs.Sub(assets, "build")
 	if err != nil {
@@ -31,7 +31,7 @@ func Handler() http.Handler {
 		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
 		// Content-hashed assets never change; everything else must be
 		// revalidated so a deploy is picked up immediately.
-		if strings.HasPrefix(r.URL.Path, "/_app/immutable/") {
+		if strings.Contains(r.URL.Path, "/_app/immutable/") {
 			h.Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			h.Set("Cache-Control", "no-cache")
