@@ -386,9 +386,12 @@ func TestUserWritesEventsAndContacts(t *testing.T) {
 	// Contacts: create, search, edit, delete.
 	rec = userDo(h, http.MethodPost, "/api/user/contacts",
 		`{"firstName":"三","lastName":"张","company":"示例科技","email1":"zhang@example.com",
-		  "mobilePhone":"13800000001","homeCity":"北京","body":"老同事"}`, cookie)
+		  "mobilePhone":"13800000001","home2Phone":"028-66665555","homeCity":"北京","body":"老同事"}`, cookie)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create contact status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"home2Phone":"028-66665555"`) {
+		t.Fatalf("home2Phone missing from %s", rec.Body.String())
 	}
 	var createdContact struct {
 		Contact struct {

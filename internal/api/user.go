@@ -1036,6 +1036,7 @@ type contactView struct {
 	Email2      string `json:"email2"`
 	Email3      string `json:"email3"`
 	HomePhone   string `json:"homePhone"`
+	Home2Phone  string `json:"home2Phone"`
 	Mobile      string `json:"mobilePhone"`
 	Business    string `json:"businessPhone"`
 	Fax         string `json:"businessFax"`
@@ -1062,8 +1063,8 @@ func contactViewOf(c *store.Contact) contactView {
 		FirstName: c.FirstName, LastName: c.LastName, MiddleName: c.MiddleName,
 		Company: c.Company, Department: c.Department, JobTitle: c.JobTitle,
 		Email1: c.Email1, Email2: c.Email2, Email3: c.Email3,
-		HomePhone: c.HomePhone, Mobile: c.MobilePhone, Business: c.BusinessPhone,
-		Fax:        c.BusinessFax,
+		HomePhone: c.HomePhone, Home2Phone: c.Home2Phone, Mobile: c.MobilePhone,
+		Business: c.BusinessPhone, Fax: c.BusinessFax,
 		HomeStreet: c.HomeStreet, HomeCity: c.HomeCity, HomeState: c.HomeState,
 		HomePostal: c.HomePostalCode, HomeCountry: c.HomeCountry,
 		WorkStreet: c.BusinessStreet, WorkCity: c.BusinessCity,
@@ -1092,6 +1093,7 @@ type contactInput struct {
 	Email3 *string `json:"email3"`
 
 	HomePhone     *string `json:"homePhone"`
+	Home2Phone    *string `json:"home2Phone"`
 	MobilePhone   *string `json:"mobilePhone"`
 	BusinessPhone *string `json:"businessPhone"`
 	BusinessFax   *string `json:"businessFax"`
@@ -1205,6 +1207,9 @@ func applyContactInput(c *store.Contact, in *contactInput) error {
 	}
 	if in.HomePhone != nil {
 		c.HomePhone = strings.TrimSpace(*in.HomePhone)
+	}
+	if in.Home2Phone != nil {
+		c.Home2Phone = strings.TrimSpace(*in.Home2Phone)
 	}
 	if in.MobilePhone != nil {
 		c.MobilePhone = strings.TrimSpace(*in.MobilePhone)

@@ -99,6 +99,7 @@ export type Contact = {
 	email2: string;
 	email3: string;
 	homePhone: string;
+	home2Phone: string;
 	mobilePhone: string;
 	businessPhone: string;
 	businessFax: string;
@@ -128,6 +129,7 @@ export type ContactInput = {
 	email2?: string;
 	email3?: string;
 	homePhone?: string;
+	home2Phone?: string;
 	mobilePhone?: string;
 	businessPhone?: string;
 	businessFax?: string;
