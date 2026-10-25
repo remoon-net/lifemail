@@ -623,8 +623,8 @@ func (h *User) calendarViewOf(f *store.Folder) (calendarView, error) {
 }
 
 func (h *User) calendar(w http.ResponseWriter, r *http.Request, user *store.User, rest string) {
-	idText, action, _ := strings.Cut(strings.Trim(rest, "/"), "/")
-	id, err := strconv.ParseInt(idText, 10, 64)
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	id, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || id <= 0 {
 		writeJSONError(w, http.StatusBadRequest, "invalid calendar id")
 		return
@@ -634,8 +634,8 @@ func (h *User) calendar(w http.ResponseWriter, r *http.Request, user *store.User
 		writeJSONError(w, http.StatusNotFound, "calendar not found")
 		return
 	}
-	switch action {
-	case "":
+	switch {
+	case len(parts) == 1:
 		if r.Method != http.MethodPatch && r.Method != http.MethodPut {
 			w.Header().Set("Allow", "PATCH, PUT")
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -666,7 +666,7 @@ func (h *User) calendar(w http.ResponseWriter, r *http.Request, user *store.User
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"calendar": view})
-	case "public":
+	case len(parts) == 2 && parts[1] == "public":
 		if r.Method != http.MethodPut && r.Method != http.MethodPost {
 			w.Header().Set("Allow", "PUT, POST")
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -703,44 +703,10 @@ func (h *User) calendar(w http.ResponseWriter, r *http.Request, user *store.User
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"calendar": view})
-	case "events":
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", "GET")
-			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-		from := int64(queryInt(r, "from", 0))
-		to := int64(queryInt(r, "to", 0))
-		events, err := h.Store.EventsByFolderBetween(f.ID, from, to)
-		if err != nil {
-			h.logError("cannot list events", err)
-			writeJSONError(w, http.StatusInternalServerError, "cannot list events")
-			return
-		}
-		type eventView struct {
-			ID          int64  `json:"id"`
-			UID         string `json:"uid"`
-			Subject     string `json:"subject"`
-			Location    string `json:"location"`
-			Body        string `json:"body"`
-			Start       int64  `json:"start"`
-			End         int64  `json:"end"`
-			AllDay      bool   `json:"allDay"`
-			BusyStatus  int    `json:"busyStatus"`
-			Recurring   bool   `json:"recurring"`
-			Organizer   string `json:"organizer"`
-			OrganizerAt string `json:"organizerAddress"`
-		}
-		out := make([]eventView, 0, len(events))
-		for _, e := range events {
-			out = append(out, eventView{
-				ID: e.ID, UID: e.UID, Subject: e.Subject, Location: e.Location,
-				Body: e.Body, Start: e.StartTime, End: e.EndTime, AllDay: e.AllDay,
-				BusyStatus: e.BusyStatus, Recurring: e.Recurrence.Active(),
-				Organizer: e.OrganizerName, OrganizerAt: e.OrganizerEmail,
-			})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"events": out})
+	case len(parts) == 2 && parts[1] == "events":
+		h.calendarEvents(w, r, user, f)
+	case len(parts) == 3 && parts[1] == "events":
+		h.calendarEvent(w, r, user, f, parts[2])
 	default:
 		writeJSONError(w, http.StatusNotFound, "not found")
 	}
@@ -761,34 +727,240 @@ func (h *User) calendarName(w http.ResponseWriter, r *http.Request) (string, boo
 	return name, true
 }
 
+// eventView is the wire shape of a calendar event.
+type eventView struct {
+	ID          int64  `json:"id"`
+	UID         string `json:"uid"`
+	Subject     string `json:"subject"`
+	Location    string `json:"location"`
+	Body        string `json:"body"`
+	Start       int64  `json:"start"`
+	End         int64  `json:"end"`
+	AllDay      bool   `json:"allDay"`
+	BusyStatus  int    `json:"busyStatus"`
+	Recurring   bool   `json:"recurring"`
+	Organizer   string `json:"organizer"`
+	OrganizerAt string `json:"organizerAddress"`
+}
+
+func eventViewOf(e *store.Event) eventView {
+	return eventView{
+		ID: e.ID, UID: e.UID, Subject: e.Subject, Location: e.Location,
+		Body: e.Body, Start: e.StartTime, End: e.EndTime, AllDay: e.AllDay,
+		BusyStatus: e.BusyStatus, Recurring: e.Recurrence.Active(),
+		Organizer: e.OrganizerName, OrganizerAt: e.OrganizerEmail,
+	}
+}
+
+// eventInput carries the fields the account UI may change. Only single
+// occurrences are created here; a repeated event keeps its recurrence rule
+// when edited, because the UI never sends one.
+type eventInput struct {
+	Subject    *string `json:"subject"`
+	Location   *string `json:"location"`
+	Body       *string `json:"body"`
+	Start      *int64  `json:"start"`
+	End        *int64  `json:"end"`
+	AllDay     *bool   `json:"allDay"`
+	BusyStatus *int    `json:"busyStatus"`
+	Reminder   *int    `json:"reminder"`
+}
+
+func (h *User) calendarEvents(w http.ResponseWriter, r *http.Request, user *store.User, f *store.Folder) {
+	switch r.Method {
+	case http.MethodGet:
+		from := int64(queryInt(r, "from", 0))
+		to := int64(queryInt(r, "to", 0))
+		events, err := h.Store.EventsByFolderBetween(f.ID, from, to)
+		if err != nil {
+			h.logError("cannot list events", err)
+			writeJSONError(w, http.StatusInternalServerError, "cannot list events")
+			return
+		}
+		out := make([]eventView, 0, len(events))
+		for _, e := range events {
+			out = append(out, eventViewOf(e))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"events": out})
+	case http.MethodPost:
+		h.createEvent(w, r, user, f)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h *User) createEvent(w http.ResponseWriter, r *http.Request, user *store.User, f *store.Folder) {
+	if !h.mutable(w, r) {
+		return
+	}
+	var in eventInput
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.Subject == nil || strings.TrimSpace(*in.Subject) == "" {
+		writeJSONError(w, http.StatusBadRequest, "subject is required")
+		return
+	}
+	if in.Start == nil || in.End == nil {
+		writeJSONError(w, http.StatusBadRequest, "start and end are required")
+		return
+	}
+	e := &store.Event{
+		UserID: f.UserID, FolderID: f.ID,
+		UID:            store.NewUUID() + "@lifemail",
+		Subject:        strings.TrimSpace(*in.Subject),
+		StartTime:      *in.Start,
+		EndTime:        *in.End,
+		OrganizerName:  user.DisplayName,
+		OrganizerEmail: user.Address,
+	}
+	if err := applyEventInput(e, &in); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id, err := h.Store.InsertEvent(e)
+	if err != nil {
+		h.logError("cannot create event", err)
+		writeJSONError(w, http.StatusInternalServerError, "cannot create event")
+		return
+	}
+	e.ID = id
+	if _, err := h.Store.AddChange(f.ID, "add", "event", id); err != nil {
+		h.logError("cannot record event change", err)
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"event": eventViewOf(e)})
+}
+
+func (h *User) calendarEvent(w http.ResponseWriter, r *http.Request, user *store.User, f *store.Folder, idText string) {
+	id, err := strconv.ParseInt(idText, 10, 64)
+	if err != nil || id <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+	e, err := h.Store.EventByID(id)
+	if err != nil || e.UserID != user.ID || e.FolderID != f.ID || e.Deleted {
+		writeJSONError(w, http.StatusNotFound, "event not found")
+		return
+	}
+	switch r.Method {
+	case http.MethodPatch, http.MethodPut:
+		if !h.mutable(w, r) {
+			return
+		}
+		var in eventInput
+		if !decodeJSON(w, r, &in) {
+			return
+		}
+		if err := applyEventInput(e, &in); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := h.Store.UpdateEvent(e); err != nil {
+			h.logError("cannot update event", err)
+			writeJSONError(w, http.StatusInternalServerError, "cannot update event")
+			return
+		}
+		if _, err := h.Store.AddChange(f.ID, "change", "event", e.ID); err != nil {
+			h.logError("cannot record event change", err)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"event": eventViewOf(e)})
+	case http.MethodDelete:
+		if !h.mutable(w, r) {
+			return
+		}
+		e.Deleted = true
+		if err := h.Store.UpdateEvent(e); err != nil {
+			h.logError("cannot delete event", err)
+			writeJSONError(w, http.StatusInternalServerError, "cannot delete event")
+			return
+		}
+		if _, err := h.Store.AddChange(f.ID, "delete", "event", e.ID); err != nil {
+			h.logError("cannot record event change", err)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		w.Header().Set("Allow", "PATCH, PUT, DELETE")
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// applyEventInput copies the provided fields and validates the result. The
+// recurrence, attendees and meeting state are left untouched: EAS clients own
+// those, and the browser only edits a single occurrence's basics.
+func applyEventInput(e *store.Event, in *eventInput) error {
+	if in.Subject != nil {
+		subject := strings.TrimSpace(*in.Subject)
+		if subject == "" || len([]rune(subject)) > 255 {
+			return errors.New("subject must be 1-255 characters")
+		}
+		e.Subject = subject
+	}
+	if in.Location != nil {
+		e.Location = strings.TrimSpace(*in.Location)
+	}
+	if in.Body != nil {
+		e.Body = *in.Body
+	}
+	if in.Start != nil {
+		e.StartTime = *in.Start
+	}
+	if in.End != nil {
+		e.EndTime = *in.End
+	}
+	if in.AllDay != nil {
+		e.AllDay = *in.AllDay
+	}
+	if in.BusyStatus != nil {
+		if *in.BusyStatus < 0 || *in.BusyStatus > 4 {
+			return errors.New("busy status must be 0-4")
+		}
+		e.BusyStatus = *in.BusyStatus
+	}
+	if in.Reminder != nil {
+		if *in.Reminder < 0 || *in.Reminder > 40320 {
+			return errors.New("reminder must be 0-40320 minutes")
+		}
+		e.Reminder = *in.Reminder
+	}
+	if e.StartTime <= 0 || e.EndTime <= 0 {
+		return errors.New("start and end must be unix seconds")
+	}
+	if e.EndTime < e.StartTime {
+		return errors.New("end must not be before start")
+	}
+	if e.EndTime-e.StartTime > 366*86400 {
+		return errors.New("event is longer than a year")
+	}
+	return nil
+}
+
 // --- contacts --------------------------------------------------------------
 
 func (h *User) contacts(w http.ResponseWriter, r *http.Request, user *store.User) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
+	switch r.Method {
+	case http.MethodGet:
+		limit := queryInt(r, "limit", 100)
+		found, err := h.Store.SearchContacts(user.ID, r.URL.Query().Get("q"), limit)
+		if err != nil {
+			h.logError("cannot list contacts", err)
+			writeJSONError(w, http.StatusInternalServerError, "cannot list contacts")
+			return
+		}
+		out := make([]contactView, 0, len(found))
+		for _, c := range found {
+			out = append(out, contactViewOf(c))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"contacts": out})
+	case http.MethodPost:
+		h.createContact(w, r, user)
+	default:
+		w.Header().Set("Allow", "GET, POST")
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
 	}
-	limit := queryInt(r, "limit", 100)
-	found, err := h.Store.SearchContacts(user.ID, r.URL.Query().Get("q"), limit)
-	if err != nil {
-		h.logError("cannot list contacts", err)
-		writeJSONError(w, http.StatusInternalServerError, "cannot list contacts")
-		return
-	}
-	out := make([]contactView, 0, len(found))
-	for _, c := range found {
-		out = append(out, contactViewOf(c))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"contacts": out})
 }
 
 func (h *User) contact(w http.ResponseWriter, r *http.Request, user *store.User, idText string) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
 	id, err := strconv.ParseInt(strings.Trim(idText, "/"), 10, 64)
 	if err != nil || id <= 0 {
 		writeJSONError(w, http.StatusBadRequest, "invalid contact id")
@@ -799,7 +971,55 @@ func (h *User) contact(w http.ResponseWriter, r *http.Request, user *store.User,
 		writeJSONError(w, http.StatusNotFound, "contact not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"contact": contactViewOf(c)})
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"contact": contactViewOf(c)})
+	case http.MethodPatch, http.MethodPut:
+		if !h.mutable(w, r) {
+			return
+		}
+		var in contactInput
+		if !decodeJSON(w, r, &in) {
+			return
+		}
+		if err := applyContactInput(c, &in); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if !contactIdentified(c) {
+			writeJSONError(w, http.StatusBadRequest, "contact needs a name, company or email")
+			return
+		}
+		if c.FileAs == "" {
+			c.FileAs = contactDisplayName(c)
+		}
+		if err := h.Store.UpdateContact(c); err != nil {
+			h.logError("cannot update contact", err)
+			writeJSONError(w, http.StatusInternalServerError, "cannot update contact")
+			return
+		}
+		if _, err := h.Store.AddChange(c.FolderID, "change", "contact", c.ID); err != nil {
+			h.logError("cannot record contact change", err)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"contact": contactViewOf(c)})
+	case http.MethodDelete:
+		if !h.mutable(w, r) {
+			return
+		}
+		c.Deleted = true
+		if err := h.Store.UpdateContact(c); err != nil {
+			h.logError("cannot delete contact", err)
+			writeJSONError(w, http.StatusInternalServerError, "cannot delete contact")
+			return
+		}
+		if _, err := h.Store.AddChange(c.FolderID, "delete", "contact", c.ID); err != nil {
+			h.logError("cannot record contact change", err)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		w.Header().Set("Allow", "GET, PATCH, PUT, DELETE")
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 type contactView struct {
@@ -853,6 +1073,220 @@ func contactViewOf(c *store.Contact) contactView {
 }
 
 // --- helpers ---------------------------------------------------------------
+
+// contactInput carries the address book fields the account UI may change.
+type contactInput struct {
+	FolderID *int64 `json:"folderId"`
+
+	FileAs     *string `json:"fileAs"`
+	FirstName  *string `json:"firstName"`
+	LastName   *string `json:"lastName"`
+	MiddleName *string `json:"middleName"`
+
+	Company    *string `json:"company"`
+	Department *string `json:"department"`
+	JobTitle   *string `json:"jobTitle"`
+
+	Email1 *string `json:"email1"`
+	Email2 *string `json:"email2"`
+	Email3 *string `json:"email3"`
+
+	HomePhone     *string `json:"homePhone"`
+	MobilePhone   *string `json:"mobilePhone"`
+	BusinessPhone *string `json:"businessPhone"`
+	BusinessFax   *string `json:"businessFax"`
+
+	HomeStreet     *string `json:"homeStreet"`
+	HomeCity       *string `json:"homeCity"`
+	HomeState      *string `json:"homeState"`
+	HomePostalCode *string `json:"homePostalCode"`
+	HomeCountry    *string `json:"homeCountry"`
+
+	BusinessStreet     *string `json:"businessStreet"`
+	BusinessCity       *string `json:"businessCity"`
+	BusinessState      *string `json:"businessState"`
+	BusinessPostalCode *string `json:"businessPostalCode"`
+	BusinessCountry    *string `json:"businessCountry"`
+
+	Body *string `json:"body"`
+}
+
+func (h *User) createContact(w http.ResponseWriter, r *http.Request, user *store.User) {
+	if !h.mutable(w, r) {
+		return
+	}
+	var in contactInput
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	folder, ok := h.contactFolder(w, user, in.FolderID)
+	if !ok {
+		return
+	}
+	c := &store.Contact{UserID: user.ID, FolderID: folder.ID}
+	if err := applyContactInput(c, &in); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !contactIdentified(c) {
+		writeJSONError(w, http.StatusBadRequest, "contact needs a name, company or email")
+		return
+	}
+	if c.FileAs == "" {
+		c.FileAs = contactDisplayName(c)
+	}
+	id, err := h.Store.InsertContact(c)
+	if err != nil {
+		h.logError("cannot create contact", err)
+		writeJSONError(w, http.StatusInternalServerError, "cannot create contact")
+		return
+	}
+	c.ID = id
+	if _, err := h.Store.AddChange(folder.ID, "add", "contact", id); err != nil {
+		h.logError("cannot record contact change", err)
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"contact": contactViewOf(c)})
+}
+
+// contactFolder resolves the target address book, defaulting to the account's
+// Contacts folder.
+func (h *User) contactFolder(w http.ResponseWriter, user *store.User, id *int64) (*store.Folder, bool) {
+	if id == nil {
+		f, err := h.Store.FolderByType(user.ID, 9)
+		if err != nil {
+			h.logError("contacts folder is missing", err)
+			writeJSONError(w, http.StatusInternalServerError, "contacts folder is missing")
+			return nil, false
+		}
+		return f, true
+	}
+	f, err := h.Store.FolderByID(*id)
+	if err != nil || f.UserID != user.ID || f.Deleted || f.Class != "Contacts" {
+		writeJSONError(w, http.StatusNotFound, "contacts folder not found")
+		return nil, false
+	}
+	return f, true
+}
+
+func applyContactInput(c *store.Contact, in *contactInput) error {
+	if in.FileAs != nil {
+		fileAs := strings.TrimSpace(*in.FileAs)
+		if len([]rune(fileAs)) > 100 {
+			return errors.New("display name must be at most 100 characters")
+		}
+		c.FileAs = fileAs
+	}
+	if in.FirstName != nil {
+		c.FirstName = strings.TrimSpace(*in.FirstName)
+	}
+	if in.LastName != nil {
+		c.LastName = strings.TrimSpace(*in.LastName)
+	}
+	if in.MiddleName != nil {
+		c.MiddleName = strings.TrimSpace(*in.MiddleName)
+	}
+	if in.Company != nil {
+		c.Company = strings.TrimSpace(*in.Company)
+	}
+	if in.Department != nil {
+		c.Department = strings.TrimSpace(*in.Department)
+	}
+	if in.JobTitle != nil {
+		c.JobTitle = strings.TrimSpace(*in.JobTitle)
+	}
+	if in.Email1 != nil {
+		c.Email1 = strings.TrimSpace(*in.Email1)
+	}
+	if in.Email2 != nil {
+		c.Email2 = strings.TrimSpace(*in.Email2)
+	}
+	if in.Email3 != nil {
+		c.Email3 = strings.TrimSpace(*in.Email3)
+	}
+	if in.HomePhone != nil {
+		c.HomePhone = strings.TrimSpace(*in.HomePhone)
+	}
+	if in.MobilePhone != nil {
+		c.MobilePhone = strings.TrimSpace(*in.MobilePhone)
+	}
+	if in.BusinessPhone != nil {
+		c.BusinessPhone = strings.TrimSpace(*in.BusinessPhone)
+	}
+	if in.BusinessFax != nil {
+		c.BusinessFax = strings.TrimSpace(*in.BusinessFax)
+	}
+	if in.HomeStreet != nil {
+		c.HomeStreet = strings.TrimSpace(*in.HomeStreet)
+	}
+	if in.HomeCity != nil {
+		c.HomeCity = strings.TrimSpace(*in.HomeCity)
+	}
+	if in.HomeState != nil {
+		c.HomeState = strings.TrimSpace(*in.HomeState)
+	}
+	if in.HomePostalCode != nil {
+		c.HomePostalCode = strings.TrimSpace(*in.HomePostalCode)
+	}
+	if in.HomeCountry != nil {
+		c.HomeCountry = strings.TrimSpace(*in.HomeCountry)
+	}
+	if in.BusinessStreet != nil {
+		c.BusinessStreet = strings.TrimSpace(*in.BusinessStreet)
+	}
+	if in.BusinessCity != nil {
+		c.BusinessCity = strings.TrimSpace(*in.BusinessCity)
+	}
+	if in.BusinessState != nil {
+		c.BusinessState = strings.TrimSpace(*in.BusinessState)
+	}
+	if in.BusinessPostalCode != nil {
+		c.BusinessPostalCode = strings.TrimSpace(*in.BusinessPostalCode)
+	}
+	if in.BusinessCountry != nil {
+		c.BusinessCountry = strings.TrimSpace(*in.BusinessCountry)
+	}
+	if in.Body != nil {
+		c.Body = strings.TrimSpace(*in.Body)
+	}
+	for _, email := range []string{c.Email1, c.Email2, c.Email3} {
+		if email != "" && (!strings.Contains(email, "@") || strings.ContainsAny(email, " \t\r\n")) {
+			return errors.New("invalid email address")
+		}
+	}
+	return nil
+}
+
+func contactIdentified(c *store.Contact) bool {
+	return c.FileAs != "" || c.FirstName != "" || c.LastName != "" ||
+		c.Email1 != "" || c.Company != ""
+}
+
+func contactDisplayName(c *store.Contact) string {
+	first, last := c.FirstName, c.LastName
+	if first != "" || last != "" {
+		// Chinese names read family-name first and carry no separator.
+		if isCJK(first) && isCJK(last) {
+			return last + first
+		}
+		return strings.TrimSpace(first + " " + last)
+	}
+	if c.Email1 != "" {
+		return c.Email1
+	}
+	return "未命名"
+}
+
+func isCJK(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < 0x2e80 {
+			return false
+		}
+	}
+	return true
+}
 
 func userViewOf(u *store.User) map[string]any {
 	return map[string]any{

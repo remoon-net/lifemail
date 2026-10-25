@@ -2,7 +2,9 @@ import type {
 	CalendarEvent,
 	CalendarRow,
 	Contact,
+	ContactInput,
 	Conversation,
+	EventInput,
 	MailFolder,
 	MailMessage,
 	UserProfile
@@ -101,10 +103,30 @@ export const mailApi = {
 		}),
 	calendarEvents: (id: number, from: number, to: number) =>
 		request<{ events: CalendarEvent[] }>(`/calendars/${id}/events?from=${from}&to=${to}`),
+	createEvent: (calendarId: number, body: EventInput) =>
+		request<{ event: CalendarEvent }>(`/calendars/${calendarId}/events`, {
+			method: 'POST',
+			...json(body)
+		}),
+	updateEvent: (calendarId: number, eventId: number, body: EventInput) =>
+		request<{ event: CalendarEvent }>(`/calendars/${calendarId}/events/${eventId}`, {
+			method: 'PATCH',
+			...json(body)
+		}),
+	deleteEvent: (calendarId: number, eventId: number) =>
+		request<{ ok: boolean }>(`/calendars/${calendarId}/events/${eventId}`, {
+			method: 'DELETE'
+		}),
 
 	contacts: (q = '', limit = 100) =>
 		request<{ contacts: Contact[] }>(
 			`/contacts?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`
 		),
-	contact: (id: number) => request<{ contact: Contact }>(`/contacts/${id}`)
+	contact: (id: number) => request<{ contact: Contact }>(`/contacts/${id}`),
+	createContact: (body: ContactInput) =>
+		request<{ contact: Contact }>('/contacts', { method: 'POST', ...json(body) }),
+	updateContact: (id: number, body: ContactInput) =>
+		request<{ contact: Contact }>(`/contacts/${id}`, { method: 'PATCH', ...json(body) }),
+	deleteContact: (id: number) =>
+		request<{ ok: boolean }>(`/contacts/${id}`, { method: 'DELETE' })
 };

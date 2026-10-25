@@ -5,15 +5,14 @@
 **目标**：为邮箱账号所有者提供一个网页端后台，能力限定为：
 
 1. 邮件按**会话**（同一个 `conversation_id`）分组展示，可展开阅读正文、下载附件、标记已读。
-2. 日历：列出自己的日历、**创建**、**重命名**、查看日历内事件。
-3. 联系人：跨联系人文件夹查看与搜索，查看详情。
+2. 日历：列出/创建/重命名自己的日历，查看事件，**新建、编辑、删除单次事件**。
+3. 联系人：跨联系人文件夹查看与搜索，**新建、编辑、删除**联系人。
 
 **非目标（本期不做）**：
 
 - 写信 / 回复 / 转发 / 提交到 outbox。
 - 删除、移动邮件、归档、垃圾邮件判定。
-- 新建或编辑日历事件（事件仍由 EAS 客户端写入）。
-- 联系人增删改（沿用 EAS 客户端写入）。
+- 在网页上设置重复事件规则：编辑客户端创建的重复事件时保留原规则。
 - 用户自助改密码、多用户管理（仍是 `/admin/` 的职责）。
 
 ## 2. 已确认的决策
@@ -129,9 +128,13 @@
 | PATCH | `/calendars/{id}` | `{name}` → `RenameFolder`（自动 bump folder seq） |
 | PUT | `/calendars/{id}/public` | `{public}` → `SetFolderPublic`，返回订阅 URL |
 | GET | `/calendars/{id}/events?from=&to=` | 事件列表，`from`/`to` 为 unix 秒 |
+| POST | `/calendars/{id}/events` | 新建单次事件，`AddChange("add","event")` |
+| PATCH | `/calendars/{id}/events/{eid}` | 更新标题/时间/地点/备注，保留重复规则，`AddChange("change","event")` |
+| DELETE | `/calendars/{id}/events/{eid}` | 软删除 + `AddChange("delete","event")` |
 
 - 所有 `{id}` 必须先校验 `Folder.UserID == 当前用户` 且 `Type == 8`、未删除。
 - 事件字段：`id,uid,subject,location,body,start,end,allDay,busyStatus,recurrenceType,sequence`。
+- 新建事件的 UID 由服务端生成（`<uuid>@lifemail`），组织者记为当前账号。
 - 订阅 URL 复用 `/calendar/<uuid>.ics`，与 `/api/me/calendars` 行为一致。
 
 ### 5.3 联系人
@@ -140,8 +143,11 @@
 |---|---|---|
 | GET | `/contacts?q=&limit=100` | 跨该用户所有 Contacts 文件夹；`q` 匹配 `file_as/first_name/last_name/company/email1..3` |
 | GET | `/contacts/{id}` | 单条详情，校验归属 |
+| POST | `/contacts` | 新建（默认写入 Contacts 文件夹），`AddChange("add","contact")` |
+| PATCH | `/contacts/{id}` | 部分更新，`AddChange("change","contact")` |
+| DELETE | `/contacts/{id}` | 软删除 + `AddChange("delete","contact")` |
 
-返回字段与 `store.Contact` 对齐（姓名、公司、职务、三个邮箱、电话、地址、备注），前端只读展示。
+返回字段与 `store.Contact` 对齐（姓名、公司、职务、三个邮箱、电话、地址、备注）。新建时至少要有姓名、公司或邮箱；`fileAs` 为空时按“姓+名”（中文）或“名 姓”（西文）生成。
 
 ## 6. 数据层新增（`internal/store`）
 

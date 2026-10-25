@@ -305,3 +305,185 @@ func TestUserCalendarsAndContacts(t *testing.T) {
 func itoaInt(v int64) string {
 	return strconv.FormatInt(v, 10)
 }
+
+func TestUserWritesEventsAndContacts(t *testing.T) {
+	h, db, user := newUserAPI(t)
+	cookie := loginUser(t, h)
+
+	// Resolve the default calendar.
+	rec := userDo(h, http.MethodGet, "/api/user/calendars", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("calendars status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var calendars struct {
+		Calendars []struct {
+			ID int64 `json:"id"`
+		} `json:"calendars"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &calendars); err != nil {
+		t.Fatal(err)
+	}
+	if len(calendars.Calendars) == 0 {
+		t.Fatal("account has no calendar")
+	}
+	calendarID := calendars.Calendars[0].ID
+	base := "/api/user/calendars/" + strconv.FormatInt(calendarID, 10) + "/events"
+
+	// Create a single event.
+	rec = userDo(h, http.MethodPost, base,
+		`{"subject":"写周报","location":"线上","start":1800000000,"end":1800003600,"reminder":15}`,
+		cookie)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create event status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Event struct {
+			ID      int64  `json:"id"`
+			Subject string `json:"subject"`
+			UID     string `json:"uid"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Event.Subject != "写周报" || created.Event.UID == "" {
+		t.Fatalf("created event = %+v", created.Event)
+	}
+	eventID := created.Event.ID
+
+	// Blank subject and inverted times are rejected.
+	for _, body := range []string{
+		`{"subject":"  ","start":1800000000,"end":1800003600}`,
+		`{"subject":"倒序","start":1800003600,"end":1800000000}`,
+	} {
+		rec = userDo(h, http.MethodPost, base, body, cookie)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid event %s status = %d", body, rec.Code)
+		}
+	}
+
+	// The event shows up in the window and can be edited.
+	rec = userDo(h, http.MethodGet,
+		base+"?from=1799990000&to=1800010000", "", cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"subject":"写周报"`) {
+		t.Fatalf("event list = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = userDo(h, http.MethodPatch,
+		base+"/"+strconv.FormatInt(eventID, 10),
+		`{"subject":"写周报（改）","location":"会议室"}`, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"subject":"写周报（改）"`) {
+		t.Fatalf("update event = %d %s", rec.Code, rec.Body.String())
+	}
+
+	changes, err := db.ChangesSince(calendarID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasChange(changes, "add", "event", eventID) || !hasChange(changes, "change", "event", eventID) {
+		t.Fatalf("event changes = %+v", changes)
+	}
+
+	// Contacts: create, search, edit, delete.
+	rec = userDo(h, http.MethodPost, "/api/user/contacts",
+		`{"firstName":"三","lastName":"张","company":"示例科技","email1":"zhang@example.com",
+		  "mobilePhone":"13800000001","homeCity":"北京","body":"老同事"}`, cookie)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create contact status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var createdContact struct {
+		Contact struct {
+			ID      int64  `json:"id"`
+			Display string `json:"display"`
+			FileAs  string `json:"fileAs"`
+		} `json:"contact"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &createdContact); err != nil {
+		t.Fatal(err)
+	}
+	if createdContact.Contact.FileAs != "张三" {
+		t.Fatalf("created contact = %+v", createdContact.Contact)
+	}
+	contactID := createdContact.Contact.ID
+
+	// An address book entry with no identity is rejected.
+	rec = userDo(h, http.MethodPost, "/api/user/contacts", `{"company":""}`, cookie)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty contact status = %d", rec.Code)
+	}
+	// A malformed address is rejected too.
+	rec = userDo(h, http.MethodPost, "/api/user/contacts", `{"fileAs":"坏地址","email1":"nope"}`, cookie)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad email status = %d", rec.Code)
+	}
+
+	rec = userDo(h, http.MethodGet, "/api/user/contacts?q=%E7%A4%BA%E4%BE%8B", "", cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"display":"张三"`) {
+		t.Fatalf("contact search = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = userDo(h, http.MethodPatch, "/api/user/contacts/"+strconv.FormatInt(contactID, 10),
+		`{"company":"新公司","email2":"zhang.san@other.test"}`, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"company":"新公司"`) {
+		t.Fatalf("update contact = %d %s", rec.Code, rec.Body.String())
+	}
+
+	contactsFolder, err := db.FolderByType(user.ID, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err = db.ChangesSince(contactsFolder.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasChange(changes, "add", "contact", contactID) ||
+		!hasChange(changes, "change", "contact", contactID) {
+		t.Fatalf("contact changes = %+v", changes)
+	}
+
+	// Deletion is soft and recorded for clients.
+	rec = userDo(h, http.MethodDelete,
+		"/api/user/calendars/"+strconv.FormatInt(calendarID, 10)+"/events/"+strconv.FormatInt(eventID, 10),
+		"", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete event status = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = userDo(h, http.MethodDelete, "/api/user/contacts/"+strconv.FormatInt(contactID, 10), "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete contact status = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = userDo(h, http.MethodGet, "/api/user/contacts?q=%E5%BC%A0", "", cookie)
+	if strings.Contains(rec.Body.String(), `"id":`+strconv.FormatInt(contactID, 10)) {
+		t.Fatalf("deleted contact still listed: %s", rec.Body.String())
+	}
+	event, err := db.EventByID(eventID)
+	if err != nil || !event.Deleted {
+		t.Fatalf("event not soft-deleted: %+v %v", event, err)
+	}
+
+	// Nobody else can touch the account's calendar.
+	hash, _ := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if _, err := db.CreateUser("bob", "bob@example.com", "Bob", string(hash)); err != nil {
+		t.Fatal(err)
+	}
+	rec = userDo(h, http.MethodPost, "/api/user/session",
+		`{"login":"bob","password":"secret"}`, nil)
+	var bobCookie *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == userCookieName {
+			bobCookie = c
+		}
+	}
+	rec = userDo(h, http.MethodPost, base,
+		`{"subject":"偷写","start":1800000000,"end":1800003600}`, bobCookie)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-account event status = %d", rec.Code)
+	}
+}
+
+func hasChange(changes []store.Change, kind, itemType string, id int64) bool {
+	for _, c := range changes {
+		if c.Kind == kind && c.ItemType == itemType && c.ItemID == id {
+			return true
+		}
+	}
+	return false
+}

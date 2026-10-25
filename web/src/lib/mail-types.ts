@@ -74,6 +74,17 @@ export type CalendarEvent = {
 	organizerAddress: string;
 };
 
+export type EventInput = {
+	subject: string;
+	location?: string;
+	body?: string;
+	start: number;
+	end: number;
+	allDay?: boolean;
+	busyStatus?: number;
+	reminder?: number;
+};
+
 export type Contact = {
 	id: number;
 	display: string;
@@ -102,4 +113,33 @@ export type Contact = {
 	businessPostalCode: string;
 	businessCountry: string;
 	body: string;
+};
+
+export type ContactInput = {
+	folderId?: number;
+	fileAs?: string;
+	firstName?: string;
+	lastName?: string;
+	middleName?: string;
+	company?: string;
+	department?: string;
+	jobTitle?: string;
+	email1?: string;
+	email2?: string;
+	email3?: string;
+	homePhone?: string;
+	mobilePhone?: string;
+	businessPhone?: string;
+	businessFax?: string;
+	homeStreet?: string;
+	homeCity?: string;
+	homeState?: string;
+	homePostalCode?: string;
+	homeCountry?: string;
+	businessStreet?: string;
+	businessCity?: string;
+	businessState?: string;
+	businessPostalCode?: string;
+	businessCountry?: string;
+	body?: string;
 };
