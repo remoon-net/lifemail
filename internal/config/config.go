@@ -22,6 +22,11 @@ type Config struct {
 	// database. It can be a mount point (for example an rclone mount).
 	AttachmentDir string
 
+	// WebDir holds the SvelteKit build (/admin/* and /app/*). It is read from
+	// disk at request time instead of being embedded, so the UI can be updated
+	// without rebuilding the binary.
+	WebDir string
+
 	// PublicBaseURL is the address clients reach the server on, for example
 	// https://mail.example.com. Used to print absolute calendar links.
 	PublicBaseURL string
@@ -44,6 +49,7 @@ func Load() Config {
 		InboundToken:  env("LIFEMAIL_INBOUND_TOKEN", ""),
 		AdminToken:    env("LIFEMAIL_ADMIN_TOKEN", ""),
 		AttachmentDir: env("LIFEMAIL_ATTACHMENT_DIR", "attachments"),
+		WebDir:        env("LIFEMAIL_WEB_DIR", "web/build"),
 		PublicBaseURL: env("LIFEMAIL_PUBLIC_BASE_URL", ""),
 		LogLevel:      env("LIFEMAIL_LOG_LEVEL", "info"),
 		AutoMigrate:   envBool("LIFEMAIL_AUTO_MIGRATE", true),

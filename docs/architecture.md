@@ -36,7 +36,7 @@ internal/
   api/               收信 API、/api/admin/*（含 metrics）、/api/me/*
   settings/          数据库中的运行时设置（域名、证书、SMTP）
   blobstore/         附件与 MIME 原文的文件存储
-web/                 SvelteKit 管理控制台（构建产物 go:embed）
+web/                 SvelteKit 管理控制台（构建到 web/build，运行时按 LIFEMAIL_WEB_DIR 读取）
 deploy/              Cloudflare Email Worker
 docs/                架构与协议笔记
 ```
@@ -53,7 +53,7 @@ docs/                架构与协议笔记
 | `/healthz` `/readyz` | 存活 / 就绪（含 DB 探活） | 公开 |
 | `/api/admin/metrics` | Prometheus 文本（需 Admin Token） | 管理接口 |
 | `/api/admin/*` | `api.Admin`（Bearer token 或会话 Cookie） | 管理接口 |
-| `/admin/` | 嵌入的前端静态资源 | 静态文件，不划分 |
+| `/admin/` | `web/` 静态文件（目录版） | 静态文件，不划分 |
 
 客户端证书不由 Go 处理：反向代理在管理域名上做证书校验，
 公开域名直接 404 掉 `/api/admin/*`（见 README 的 Caddy 示例）。
@@ -171,7 +171,8 @@ sync_items(device, folder, item_id)         ← 设备已知条目，决定 Add/
 - SvelteKit 3 + Svelte 5 runes + TypeScript + Tailwind CSS 4
 - `adapter-static`，`paths.base=/admin`，全部页面预渲染，SSR 关闭
 - `#lib/*` 是源码内的共享模块（组件、API 客户端、格式化、状态）
-- 构建产物通过 `go:embed` 进二进制；`_app/immutable/*` 返回一年 immutable 缓存，
+- 构建产物写到 `web/build`，不再 `go:embed`：二进制按 `LIFEMAIL_WEB_DIR`
+  读目录，换前端文件不用重编；`_app/immutable/*` 返回一年 immutable 缓存，
   HTML 返回 `no-cache`
 - API 客户端集中在 `web/src/lib/api.ts`，类型在 `lib/types.ts`；401 统一回到登录页
 - 页面按职责拆分：概览 / 用户 / 地址别名 / 域名证书 / 发件队列 / 设备 / 日历订阅 / 设置 / 诊断

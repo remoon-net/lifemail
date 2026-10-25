@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	webui "remoon.net/lifemail/web"
 )
 
 func stubRouteDeps() routeDeps {
@@ -24,6 +26,7 @@ func stubRouteDeps() routeDeps {
 		User:         stub("user"),
 		Calendar:     stub("calendar"),
 		Metrics:      stub("metrics"),
+		Web:          http.NotFoundHandler(),
 	}
 }
 
@@ -89,19 +92,38 @@ func TestHandlerRedirectsRootToApp(t *testing.T) {
 	}
 }
 
-// Both UI trees are prerendered directories in the embedded build.
+// Both UI trees are prerendered directories in the build on disk.
 func TestHandlerServesUI(t *testing.T) {
 	if _, err := os.Stat("../../web/build/admin/index.html"); err != nil {
 		t.Skip("web/build is not present; run make web")
 	}
+	ui, err := webui.DirHandler("../../web/build")
+	if err != nil {
+		t.Fatalf("web handler: %v", err)
+	}
+	deps := stubRouteDeps()
+	deps.Web = ui
+	h := newHTTPHandler(deps)
 	for _, path := range []string{"/admin/", "/app/"} {
 		rec := httptest.NewRecorder()
-		newHTTPHandler(stubRouteDeps()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("GET %s: status %d, want 200", path, rec.Code)
 		}
 		if !strings.Contains(rec.Body.String(), "<!doctype html>") {
 			t.Fatalf("GET %s: unexpected body %q", path, rec.Body.String())
 		}
+	}
+}
+
+// A missing build directory degrades to 404 instead of failing startup.
+func TestHandlerWithoutWebDir(t *testing.T) {
+	if _, err := webui.DirHandler("../../web/does-not-exist"); err == nil {
+		t.Fatal("DirHandler accepted a missing directory")
+	}
+	rec := httptest.NewRecorder()
+	newHTTPHandler(stubRouteDeps()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /app/ without a build: status %d, want 404", rec.Code)
 	}
 }

@@ -1,3 +1,7 @@
-# Only the prebuilt binary is needed in the build context.
+# Only the prebuilt binary and the UI build are needed in the build context.
 *
 !lifemail
+# Keep web/build (adapter-static output) and nothing else under web/.
+!web
+web/*
+!web/build

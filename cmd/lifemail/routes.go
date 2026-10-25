@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"remoon.net/lifemail/internal/store"
-	webui "remoon.net/lifemail/web"
 )
 
 // routeDeps holds the handlers the HTTP server exposes. Store is only used by
@@ -23,6 +22,9 @@ type routeDeps struct {
 	User         http.Handler
 	Calendar     http.Handler
 	Metrics      http.Handler
+	// Web serves the static UI build (/admin/* and /app/*). It may be nil when
+	// the build directory is missing; the API keeps working then.
+	Web http.Handler
 }
 
 // newHTTPHandler mounts both surfaces on one listener. Only the API is split
@@ -60,10 +62,12 @@ func newHTTPHandler(d routeDeps) http.Handler {
 
 	registerHealth(mux, d.Store)
 
-	// Everything else is the embedded UI: /admin/* is the operator console and
-	// /app/* is the account UI; both are prerendered directories in the same
-	// build.
-	console := webConsole()
+	// Everything else is the UI: /admin/* is the operator console and /app/* is
+	// the account UI; both are prerendered directories in the same build.
+	console := d.Web
+	if console == nil {
+		console = http.NotFoundHandler()
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.EqualFold(r.URL.Path, "/Microsoft-Server-ActiveSync"),
@@ -80,12 +84,7 @@ func newHTTPHandler(d routeDeps) http.Handler {
 	return mux
 }
 
-// webConsole serves the embedded SvelteKit build. It contains /admin/*, the
-// operator console, and /app/*, the account UI.
-func webConsole() http.Handler {
-	return webui.Handler()
-}
-
+// registerHealth mounts the liveness and readiness probes.
 func registerHealth(mux *http.ServeMux, st *store.Store) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

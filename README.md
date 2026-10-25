@@ -51,7 +51,7 @@ EAS 真机行为与踩坑记录见 [docs/eas-notes.md](docs/eas-notes.md)。
 ## 快速开始
 
 ```bash
-# 1. 构建（前端构建后嵌入二进制；需要 Node 22+ 与 pnpm）
+# 1. 构建（前端产物在 web/build，二进制运行时读取；需要 Node 22+ 与 pnpm）
 make build
 
 # 2. 初始化数据库（serve 也会自动迁移，这一步可以省略）
@@ -242,10 +242,10 @@ attachments/out/01/1-<hash>.eml    ← 排队中的邮件
 
 ## 容器部署
 
-镜像只包含预编译的静态二进制，不包含 Go 工具链：
+镜像只包含预编译的静态二进制和前端构建产物，不包含 Go 工具链与 Node：
 
 ```bash
-make build        # 先构建前端，再交叉编译
+make build        # 先构建前端到 web/build，再交叉编译二进制
 make image        # docker build -t shynome/lifemail:$(git describe --tags --always)
 
 docker run -d --name lifemail -p 8080:8080 \
@@ -254,7 +254,11 @@ docker run -d --name lifemail -p 8080:8080 \
   "shynome/lifemail:$(git describe --tags --always)"
 ```
 
-ARM 服务器：`make build GOARCH=arm64 image`。
+前端不嵌入二进制：镜像里 `COPY web/build /srv/lifemail/web`，并以
+`LIFEMAIL_WEB_DIR=/srv/lifemail/web` 运行。只想换 UI 时，把新的 `web/build`
+挂载覆盖这个目录即可，不用重做镜像（需与二进制的构建版本匹配）。
+
+ARM 服务器：`make build GOARCH=arm64 image`。只想重新编译后端：`make gobuild`（不动前端）。
 
 镜像自带 `HEALTHCHECK`，每 30 秒请求 `/healthz`。
 
@@ -269,9 +273,27 @@ make check             # 只做静态检查（gofmt + vet + svelte-check）
 
 cd web
 pnpm install
-pnpm run dev            # 另开终端运行 ./lifemail serve
-pnpm run build          # 输出到 web/build，供 go:embed 使用
+pnpm run build          # 输出到 web/build，二进制运行时按 LIFEMAIL_WEB_DIR 读取
 ```
+
+### 前端开发模式（热更新 + 反代后端）
+
+`vite dev` 会把 `/api` 反代到 Go 服务，所以改前端不用反复 `pnpm run build`：
+
+```bash
+./lifemail serve                       # 终端一：后端，默认 :8080
+cd web && pnpm run dev                 # 终端二：http://localhost:5173/
+
+# 后端不在默认地址时指定目标
+LIFEMAIL_DEV_API=http://127.0.0.1:18080 pnpm run dev
+```
+
+- 浏览器打开 `http://localhost:5173/app/`，登录一次（Cookie 落在 5173），之后源文件保存即热更新。
+- `pnpm run preview` 同样代理 `/api`，用来验证 `pnpm run build` 的产物。
+- 代理保留原始 `Host`，这样后端的同源（CSRF）校验能通过；若要跨机器访问，用 `--host` 并把
+  `LIFEMAIL_DEV_API` 指向可达的后端地址。
+- 严格 CSP 只在 `vite build` 时注入（构建产物自带），dev 下不注入，否则会挡掉 vite 的 worker 与 HMR。
+- 跑过 `pnpm run check`（内部会 `svelte-kit sync`）后 dev server 可能返回 404，重启 `pnpm run dev` 即可。
 
 版本号由 `make build` 注入：`git describe --tags --always --dirty`。
 

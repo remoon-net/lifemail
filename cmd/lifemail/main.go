@@ -37,6 +37,7 @@ import (
 	"remoon.net/lifemail/internal/smtp"
 	"remoon.net/lifemail/internal/store"
 	"remoon.net/lifemail/internal/submission"
+	webui "remoon.net/lifemail/web"
 )
 
 // version is set at build time with -X main.version=<git describe>.
@@ -231,6 +232,15 @@ func runServer(cfg config.Config, opts serveOptions) {
 		logger.Warn("tls certificate problem", "err", problem)
 	}
 
+	// The UI build is read from disk, so it can be replaced without restarting
+	// the binary. A missing directory only costs the two web surfaces.
+	var webHandler http.Handler
+	if webHandler, err = webui.DirHandler(cfg.WebDir); err != nil {
+		logger.Warn("web UI is unavailable", "dir", cfg.WebDir, "err", err,
+			"hint", "run make web or point LIFEMAIL_WEB_DIR at the build")
+		webHandler = nil
+	}
+
 	var mailListeners []net.Listener
 	if imapsAddr != "" || smtpsAddr != "" {
 		mailTLS := runtimeSettings.TLSConfig()
@@ -288,18 +298,21 @@ func runServer(cfg config.Config, opts serveOptions) {
 		// admin token, so webmail login is unavailable when that token is
 		// unset (the Basic-auth /api/me surface keeps working).
 		User: &api.User{
-			Store:       st,
-			Log:         logger,
-			Token:       cfg.AdminToken,
-			AuthLimiter: authlimit.New(authMaxFailures, authFailureWindow, authLockout),
-			BaseURL:     cfg.PublicBaseURL,
-			Version:     version,
+			Store:         st,
+			Log:           logger,
+			Token:         cfg.AdminToken,
+			AuthLimiter:   authlimit.New(authMaxFailures, authFailureWindow, authLockout),
+			BaseURL:       cfg.PublicBaseURL,
+			Version:       version,
+			Sender:        sender,
+			IsLocalDomain: isLocalDomain,
 		},
 		// Read-only iCalendar subscription feeds. The UUID in the path is the
 		// credential; whether it resolves at all is the owner's per-calendar
 		// choice.
 		Calendar: ical.Handler{Store: st},
 		Metrics:  &api.Metrics{Store: st, Token: cfg.AdminToken, Version: version},
+		Web:      webHandler,
 	}
 
 	srv := &http.Server{
