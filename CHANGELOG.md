@@ -4,6 +4,37 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-10-26
+
+### Added
+
+- **用户后台 `/app/`**（账号所有者用邮箱密码登录）
+  - 邮件按会话展示，收件箱与已发送合并成同一个会话；主题取会话首封
+  - 阅读窗格渲染 HTML（沙箱 iframe）或纯文本，附件可直接下载，进入会话即标记已读
+  - 底部聊天式回复栏：`Enter` 发送、`Shift+Enter` 换行；可编辑回复对象（默认原发件人 +
+    原信 To/Cc，自动剔除自己的地址与别名）
+  - `POST /api/user/mail/reply` 生成带 `In-Reply-To`/`References` 的纯文本回复，
+    先写已发送副本再投递，本地走内部投递、外域走 SMTP，失败入发件队列
+  - `GET /api/user/mail/search` 跨文件夹搜索主题、发件人、收件人与正文；列表上的搜索
+    框默认收起，回车或点「搜索」才发起一次请求
+  - 日历：创建/重命名/公开订阅，事件的新建、编辑、删除（重复事件只读，提示在客户端编辑）
+  - 联系人：跨文件夹查看与搜索，新建、编辑、删除；电话/邮箱按 MS-ASCNTC 允许的类型
+    动态增删
+
+### Changed
+
+- 前端不再 `go:embed` 进二进制：改为启动时读取 `LIFEMAIL_WEB_DIR`（默认 `web/build`），
+  替换目录即可更新界面；目录缺失只影响 `/app/` 与 `/admin/`，API 照常工作
+- 镜像改为 `COPY web/build /srv/lifemail/web` 并设置 `LIFEMAIL_WEB_DIR`；
+  `make build` 仍先构建前端，新增 `make gobuild` 只重编后端
+- `vite dev` / `vite preview` 把 `/api` 反代到 Go 服务（`LIFEMAIL_DEV_API`，默认
+  `127.0.0.1:8080`），前端可热更新；严格 CSP 只在 `vite build` 时注入
+
+### Fixed
+
+- 会话默认回复对象为空时（原信缺少地址）前端取不到收件人列表，导致会话打不开
+- 回复后会话头部的邮件封数不刷新
+
 ## [0.1.1] - 2026-10-24
 
 ### Fixed
