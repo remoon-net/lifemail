@@ -43,7 +43,8 @@ func (s *Store) FolderCounts(userID string) ([]FolderCount, error) {
 // conversation_id column. The CAST keeps PostgreSQL's || operator happy.
 const conversationKeyExpr = `CASE WHEN conversation_id = '' THEN 'm:' || CAST(id AS TEXT) ELSE conversation_id END`
 
-// Conversation is one thread's summary inside a single folder.
+// Conversation is one thread's summary. Inbox and Sent are aggregated
+// together, so a reply shows up in the conversation it belongs to.
 type Conversation struct {
 	// Key is the raw conversation id, or "m:<id>" for messages without one.
 	// HTTP handlers base64url it before putting it on the wire.
@@ -58,37 +59,112 @@ type Conversation struct {
 	ToAddr         string
 	Preview        string
 	HasAttachments bool
+	HasInbox       bool
+	HasSent        bool
 }
 
-// ConversationSummaries groups a folder's live messages by conversation,
-// newest thread first. The latest message of each thread supplies the display
-// fields, so opening the list costs two queries instead of one per row.
-func (s *Store) ConversationSummaries(folderID int64, limit int) ([]*Conversation, error) {
+// mailFolderIDs returns the live Inbox and Sent folder ids of an account.
+func (s *Store) mailFolderIDs(userID string) (inbox, sent int64, err error) {
+	type row struct {
+		ID   int64 `db:"id"`
+		Type int   `db:"type"`
+	}
+	var rows []row
+	if err := s.getAll(&rows,
+		`SELECT id, type FROM folders WHERE user_id = ? AND deleted = 0 AND type IN (2, 5)`,
+		userID); err != nil {
+		return 0, 0, err
+	}
+	for _, r := range rows {
+		switch r.Type {
+		case 2:
+			inbox = r.ID
+		case 5:
+			sent = r.ID
+		}
+	}
+	return inbox, sent, nil
+}
+
+// MailFolderIDs exposes the Inbox and Sent folder ids for the webmail reader.
+func (s *Store) MailFolderIDs(userID string) (inbox, sent int64, err error) {
+	return s.mailFolderIDs(userID)
+}
+
+// conversationScope returns the folders a thread is read from. Inbox and Sent
+// form one scope; every other folder stays isolated.
+func (s *Store) conversationScope(userID string, folderID int64) ([]int64, error) {
+	inbox, sent, err := s.mailFolderIDs(userID)
+	if err != nil {
+		return nil, err
+	}
+	if inbox == 0 || (folderID != inbox && folderID != sent) {
+		return []int64{folderID}, nil
+	}
+	scope := []int64{inbox}
+	if sent != 0 && sent != inbox {
+		scope = append(scope, sent)
+	}
+	return scope, nil
+}
+
+// ConversationSummaries groups live messages by conversation, newest thread
+// first. Inbox and Sent share one thread list; other folders stay separate.
+func (s *Store) ConversationSummaries(userID string, folderID int64, limit int) ([]*Conversation, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 200 {
 		limit = 200
 	}
+	inbox, sent, err := s.mailFolderIDs(userID)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := s.conversationScope(userID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	crossFolder := len(scope) > 1 || (inbox != 0 && folderID == inbox)
+
 	type row struct {
 		Key      string `db:"cid"`
 		LastAt   int64  `db:"last_at"`
 		LatestID int64  `db:"latest_id"`
 		Total    int    `db:"total"`
 		Unread   int    `db:"unread"`
+		HasInbox int    `db:"has_inbox"`
+		HasSent  int    `db:"has_sent"`
 	}
-	var rows []row
-	if err := s.getAll(&rows,
-		`SELECT `+conversationKeyExpr+` AS cid,
+
+	query := `SELECT ` + conversationKeyExpr + ` AS cid,
 		        MAX(date_received) AS last_at,
 		        MAX(id) AS latest_id,
 		        COUNT(*) AS total,
-		        COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread
+		        COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread,
+		        MAX(CASE WHEN folder_id = ? THEN 1 ELSE 0 END) AS has_inbox,
+		        MAX(CASE WHEN folder_id = ? THEN 1 ELSE 0 END) AS has_sent
 		 FROM messages
-		 WHERE folder_id = ? AND deleted = 0
-		 GROUP BY `+conversationKeyExpr+`
-		 ORDER BY last_at DESC, latest_id DESC
-		 LIMIT ?`, folderID, limit); err != nil {
+		 WHERE user_id = ? AND deleted = 0 AND folder_id IN (?)
+		 GROUP BY ` + conversationKeyExpr
+	args := []any{inbox, sent, userID, scope}
+	if crossFolder && folderID == inbox {
+		query += ` HAVING MAX(CASE WHEN folder_id = ? THEN 1 ELSE 0 END) = 1`
+		args = append(args, inbox)
+	}
+	if crossFolder && folderID == sent {
+		query += ` HAVING MAX(CASE WHEN folder_id = ? THEN 1 ELSE 0 END) = 1`
+		args = append(args, sent)
+	}
+	query += ` ORDER BY last_at DESC, latest_id DESC LIMIT ?`
+	args = append(args, limit)
+
+	q, inArgs, err := sqlx.In(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	var rows []row
+	if err := s.getAll(&rows, q, inArgs...); err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
@@ -102,11 +178,16 @@ func (s *Store) ConversationSummaries(folderID int64, limit int) ([]*Conversatio
 	if err != nil {
 		return nil, err
 	}
+	firstSubjects, err := s.conversationFirstSubjects(userID, scope)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]*Conversation, 0, len(rows))
 	for _, r := range rows {
 		c := &Conversation{
 			Key: r.Key, LastAt: r.LastAt, LatestID: r.LatestID,
 			Count: r.Total, Unread: r.Unread,
+			HasInbox: r.HasInbox != 0, HasSent: r.HasSent != 0,
 		}
 		if m := latest[r.LatestID]; m != nil {
 			c.Subject = m.Subject
@@ -116,19 +197,58 @@ func (s *Store) ConversationSummaries(folderID int64, limit int) ([]*Conversatio
 			c.Preview = previewText(m.BodyText, 140)
 			c.HasAttachments = m.HasAttachments
 		}
+		// Replies carry a "Re:" prefix; the thread keeps the subject of its
+		// oldest message so the list does not churn on every reply.
+		if subject := firstSubjects[r.Key]; subject != "" {
+			c.Subject = subject
+		}
 		out = append(out, c)
 	}
 	return out, nil
 }
 
-// ConversationMessages returns the live messages of one thread in a folder,
-// oldest first, so the reader can expand it without another list round trip.
-func (s *Store) ConversationMessages(folderID int64, key string, limit int) ([]*Message, error) {
+// conversationFirstSubjects maps a conversation key to the subject of its
+// oldest message, used as the thread title.
+func (s *Store) conversationFirstSubjects(userID string, folderIDs []int64) (map[string]string, error) {
+	query := `SELECT cid, subject FROM (
+		SELECT ` + conversationKeyExpr + ` AS cid, subject,
+		       ROW_NUMBER() OVER (PARTITION BY ` + conversationKeyExpr +
+		` ORDER BY date_received ASC, id ASC) AS rn
+		FROM messages
+		WHERE user_id = ? AND deleted = 0 AND folder_id IN (?)
+	) ranked WHERE rn = 1`
+	q, inArgs, err := sqlx.In(query, userID, folderIDs)
+	if err != nil {
+		return nil, err
+	}
+	type row struct {
+		Key     string `db:"cid"`
+		Subject string `db:"subject"`
+	}
+	var rows []row
+	if err := s.getAll(&rows, q, inArgs...); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.Key] = r.Subject
+	}
+	return out, nil
+}
+
+// ConversationMessages returns the live messages of one thread, oldest first.
+// When the folder is Inbox or Sent, both folders are read so a reply appears
+// in the conversation.
+func (s *Store) ConversationMessages(userID, key string, folderID int64, limit int) ([]*Message, error) {
 	if limit <= 0 {
 		limit = 200
 	}
 	if limit > 200 {
 		limit = 200
+	}
+	scope, err := s.conversationScope(userID, folderID)
+	if err != nil {
+		return nil, err
 	}
 	// "m:<id>" is the fallback key for messages without a conversation id.
 	if rest, ok := strings.CutPrefix(key, "m:"); ok {
@@ -140,18 +260,31 @@ func (s *Store) ConversationMessages(folderID int64, key string, limit int) ([]*
 		if err != nil {
 			return nil, err
 		}
-		if m.FolderID != folderID || m.Deleted {
+		if m.UserID != userID || m.Deleted || !containsID(scope, m.FolderID) {
 			return nil, ErrNotFound
 		}
 		return []*Message{m}, nil
 	}
+	q, args, err := sqlx.In(
+		messageSelect+` WHERE user_id = ? AND deleted = 0 AND folder_id IN (?) AND conversation_id = ?
+		 ORDER BY date_received, id LIMIT ?`, userID, scope, key, limit)
+	if err != nil {
+		return nil, err
+	}
 	var rows []messageRow
-	if err := s.getAll(&rows,
-		messageSelect+` WHERE folder_id = ? AND deleted = 0 AND conversation_id = ?
-		 ORDER BY date_received, id LIMIT ?`, folderID, key, limit); err != nil {
+	if err := s.getAll(&rows, q, args...); err != nil {
 		return nil, err
 	}
 	return messageRows(rows), nil
+}
+
+func containsID(ids []int64, id int64) bool {
+	for _, candidate := range ids {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
 }
 
 // messagesByID loads message metadata for a set of ids.

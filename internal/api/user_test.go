@@ -10,10 +10,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"remoon.net/lifemail/internal/blobstore"
+	"remoon.net/lifemail/internal/deliver"
+	"remoon.net/lifemail/internal/mailparse"
 	"remoon.net/lifemail/internal/store"
 )
 
@@ -40,11 +43,12 @@ func newUserAPI(t *testing.T) (*User, *store.Store, *store.User) {
 		t.Fatalf("create user: %v", err)
 	}
 	h := &User{
-		Store:   db,
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Token:   "admin-token",
-		BaseURL: "https://mail.example.com",
-		Version: "test",
+		Store:         db,
+		Log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Token:         "admin-token",
+		BaseURL:       "https://mail.example.com",
+		Version:       "test",
+		IsLocalDomain: func(domain string) bool { return domain == "example.com" },
 	}
 	return h, db, user
 }
@@ -489,4 +493,216 @@ func hasChange(changes []store.Change, kind, itemType string, id int64) bool {
 		}
 	}
 	return false
+}
+
+func TestUserReply(t *testing.T) {
+	h, db, alice := newUserAPI(t)
+	cookie := loginUser(t, h)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := db.CreateUser("bob", "bob@example.com", "Bob", string(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	carol, err := db.CreateUser("carol", "carol@example.com", "Carol", string(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw := []byte("From: Bob <bob@example.com>\r\n" +
+		"To: Alice <alice@example.com>, Carol <carol@example.com>\r\n" +
+		"Subject: 项目排期\r\n" +
+		"Date: " + time.Now().Format(time.RFC1123Z) + "\r\n" +
+		"Message-ID: <orig@example.com>\r\n" +
+		"References: <root@example.com>\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n\r\nhello\r\n")
+	parsed, err := mailparse.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalID, err := deliver.ToUser(db, alice, deliver.FolderInbox, parsed, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Reply All keeps the other participants.
+	rec := userDo(h, http.MethodPost, "/api/user/mail/reply",
+		`{"messageId":`+strconv.FormatInt(originalID, 10)+
+			`,"body":"收到，明天答复","replyAll":true}`, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reply status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	for _, account := range []*store.User{bob, carol} {
+		inbox, err := db.FolderByType(account.ID, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, err := db.MessagesByFolder(inbox.ID, 10)
+		if err != nil || len(messages) != 1 {
+			t.Fatalf("%s inbox = %d messages (%v), want 1", account.Name, len(messages), err)
+		}
+		reply := messages[0]
+		if reply.Subject != "Re: 项目排期" {
+			t.Fatalf("%s subject = %q", account.Name, reply.Subject)
+		}
+		if !strings.EqualFold(reply.FromAddr, alice.Address) {
+			t.Fatalf("%s reply from = %q", account.Name, reply.FromAddr)
+		}
+	}
+
+	// The sender keeps a copy in Sent, threaded with the original.
+	sentFolder, err := db.FolderByType(alice.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentMessages, err := db.MessagesByFolder(sentFolder.ID, 10)
+	if err != nil || len(sentMessages) != 1 {
+		t.Fatalf("sent = %d messages (%v), want 1", len(sentMessages), err)
+	}
+	if sentMessages[0].ConversationID != "ref:root@example.com" {
+		t.Fatalf("reply conversation = %q", sentMessages[0].ConversationID)
+	}
+
+	// The inbox conversation now contains the reply too.
+	rec = userDo(h, http.MethodGet, "/api/user/mail/conversations", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("conversations status = %d", rec.Code)
+	}
+	var listing struct {
+		Conversations []struct {
+			Key    string `json:"key"`
+			Count  int    `json:"count"`
+			Unread int    `json:"unread"`
+		} `json:"conversations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Conversations) != 1 {
+		t.Fatalf("conversations = %+v", listing.Conversations)
+	}
+	if listing.Conversations[0].Count != 2 || listing.Conversations[0].Unread != 1 {
+		t.Fatalf("conversation = %+v", listing.Conversations[0])
+	}
+
+	rec = userDo(h, http.MethodGet,
+		"/api/user/mail/thread?key="+listing.Conversations[0].Key, "", cookie)
+	if rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), "hello") ||
+		!strings.Contains(rec.Body.String(), "收到，明天答复") {
+		t.Fatalf("thread = %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Somebody else cannot reply to Alice's mail.
+	bobCookieRec := userDo(h, http.MethodPost, "/api/user/session",
+		`{"login":"bob","password":"secret"}`, nil)
+	var bobCookie *http.Cookie
+	for _, c := range bobCookieRec.Result().Cookies() {
+		if c.Name == userCookieName {
+			bobCookie = c
+		}
+	}
+	rec = userDo(h, http.MethodPost, "/api/user/mail/reply",
+		`{"messageId":`+strconv.FormatInt(originalID, 10)+`,"body":"x"}`, bobCookie)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-account reply status = %d", rec.Code)
+	}
+}
+
+func TestBareAddress(t *testing.T) {
+	cases := map[string]string{
+		"Bob <bob@example.com>":     "bob@example.com",
+		"<carol@example.com>":       "carol@example.com",
+		"dave@example.com":          "dave@example.com",
+		"  张三 <zhang@example.com> ": "zhang@example.com",
+		"":                          "",
+		"   ":                       "",
+	}
+	for input, want := range cases {
+		if got := bareAddress(input); got != want {
+			t.Fatalf("bareAddress(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestUserSearchMail(t *testing.T) {
+	h, db, alice := newUserAPI(t)
+	cookie := loginUser(t, h)
+
+	inbox, err := db.FolderByType(alice.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, err := db.FolderByType(alice.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []*store.Message{
+		{
+			UserID: alice.ID, FolderID: inbox.ID, Subject: "合同附件",
+			FromAddr: "bob@example.com", FromName: "Bob", ToAddr: alice.Address,
+			ConversationID: "ref:c@x", DateReceived: 100,
+			BodyText: "附件里是最终版合同。",
+		},
+		{
+			UserID: alice.ID, FolderID: sent.ID, Subject: "Re: 合同附件",
+			FromAddr: alice.Address, ToAddr: "bob@example.com",
+			ConversationID: "ref:c@x", DateReceived: 200, IsRead: true,
+			BodyText: "已确认，谢谢。",
+		},
+	} {
+		if _, err := db.InsertMessage(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := userDo(h, http.MethodGet, "/api/user/mail/search?q=%E5%90%88%E5%90%8C", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Query string `json:"query"`
+		Total int    `json:"total"`
+		Hits  []struct {
+			ID         int64  `json:"id"`
+			FolderID   int64  `json:"folderId"`
+			FolderName string `json:"folderName"`
+			Key        string `json:"key"`
+			Subject    string `json:"subject"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Total != 2 || len(out.Hits) != 2 {
+		t.Fatalf("search hits = %+v", out)
+	}
+	if out.Hits[0].FolderName == "" || out.Hits[0].Key == "" {
+		t.Fatalf("hit is missing folder or key: %+v", out.Hits[0])
+	}
+
+	// An empty query is a no-op rather than an error.
+	rec = userDo(h, http.MethodGet, "/api/user/mail/search?q=", "", cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"total":0`) {
+		t.Fatalf("empty search = %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Someone else's folder id is rejected.
+	other, err := db.CreateUser("bob", "bob@example.com", "Bob", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherInbox, err := db.FolderByType(other.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = userDo(h, http.MethodGet,
+		"/api/user/mail/search?q=x&folder="+strconv.FormatInt(otherInbox.ID, 10), "", cookie)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign folder status = %d", rec.Code)
+	}
 }

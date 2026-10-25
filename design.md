@@ -4,13 +4,14 @@
 
 **目标**：为邮箱账号所有者提供一个网页端后台，能力限定为：
 
-1. 邮件按**会话**（同一个 `conversation_id`）分组展示，可展开阅读正文、下载附件、标记已读。
+1. 邮件按**会话**（同一个 `conversation_id`）分组展示，可展开阅读正文、下载附件、标记已读，
+   **回复 / 全部回复**（纯文本，不引用原文）。
 2. 日历：列出/创建/重命名自己的日历，查看事件，**新建、编辑、删除单次事件**。
 3. 联系人：跨联系人文件夹查看与搜索，**新建、编辑、删除**联系人。
 
 **非目标（本期不做）**：
 
-- 写信 / 回复 / 转发 / 提交到 outbox。
+- 新写信（回复之外的撰写）、转发、草稿保存、提交到 outbox。
 - 删除、移动邮件、归档、垃圾邮件判定。
 - 在网页上设置重复事件规则：编辑客户端创建的重复事件时保留原规则。
 - 用户自助改密码、多用户管理（仍是 `/admin/` 的职责）。
@@ -23,7 +24,7 @@
 | 入口 | `/` 一律重定向到 `/app/` |
 | 用户认证 | 邮箱账号（login name 或主地址）+ 密码 → HttpOnly 签名 Cookie，12 小时 |
 | 日历 | 创建 / 重命名日历 + 查看事件列表 |
-| 邮件 | 会话列表 + 正文 + 附件下载 + 标记已读（只读为主） |
+| 邮件 | 会话列表（收件箱 + 已发送合并）+ 正文 + 附件下载 + 标记已读 + 回复/全部回复 |
 
 ## 3. 路由与静态资源
 
@@ -51,9 +52,10 @@
 `cmd/lifemail/routes.go`：
 
 - 新增 `User http.Handler` 挂到 `/api/user/`。
-- `/admin/` 不再 `StripPrefix`，改为直接把 embed 的 `build` 目录挂在根上；`/admin/...` 是 `build/admin/...` 下的真实文件。
+- `/admin/` 不再 `StripPrefix`，改为直接把 `LIFEMAIL_WEB_DIR`（默认 `web/build`）挂到根上；
+  `/admin/...` 是 `build/admin/...` 下的真实文件。
 - 根 handler 的兜底顺序：EAS 大小写兼容路径 → `GET /` 重定向到 `/app/` → 静态文件。
-- `web/embed.go` 的 immutable 缓存判定把 `/admin/_app/immutable/` 改为 `strings.Contains(path, "/_app/immutable/")`。
+- `web/handler.go` 的 immutable 缓存判定把 `/admin/_app/immutable/` 改为 `strings.Contains(path, "/_app/immutable/")`。
 - `cmd/lifemail/routes_test.go` 同步更新（`/admin/` 仍返回 200；新增 `/`、`/api/user/*` 断言）。
 
 ## 4. 认证与会话
@@ -95,8 +97,10 @@
 | GET | `/mail/conversations?folder=<id>&limit=50` | 会话摘要列表 |
 | GET | `/mail/thread?key=<b64url>` | 该会话内的消息摘要（按时间升序） |
 | GET | `/mail/messages/{id}` | 单封详情：正文 text/html + 附件元数据 |
+| GET | `/mail/search?q=&limit=50` | 跨文件夹搜索（主题/发件人/收件人/正文） |
 | GET | `/mail/attachments/{id}` | 附件下载（`Content-Disposition: attachment`） |
 | POST | `/mail/messages/{id}/read` | 标记已读并 `AddChange(folder,"change","email",id)` |
+| POST | `/mail/reply` | `{messageId,body,replyAll,subject}` → 发送纯文本回复 |
 
 会话摘要字段：
 
@@ -104,7 +108,8 @@
 {
   "key": "cmVmOjEyMy4uLg",
   "subject": "Re: 合同",
-  "participants": [{"name": "张三", "address": "z@example.com"}],
+  "from": {"name": "张三", "address": "z@example.com"},
+  "to": "alice@example.com",
   "lastAt": 1792558000,
   "count": 4,
   "unread": 1,
@@ -115,9 +120,40 @@
 ```
 
 - `key` = `base64url(conversation_id)`；`conversation_id` 为空时用 `m:<messages.id>`，避免新旧数据无会话标识。
-- 会话始终限定在**一个文件夹**内聚合（收件箱的会话不会混入已发送）。
+- **收件箱与已发送合并**成同一个会话（同 `conversation_id`），自己发出的回复会跟原信在一起；其他文件夹（草稿/垃圾/已删除）仍各自独立，不串到收件箱。
+- `folder` 省略时取收件箱；在收件箱视图里只显示「至少有一封在收件箱」的会话，在已发送视图里只显示「至少有一封在已发送」的会话。
 - 排序按该会话最新一封的 `date_received` 倒序，`limit` 默认 50、上限 200。
-- `thread` 接口返回该会话在当前文件夹内的全部消息（上限 200），供阅读窗格展开。
+- `thread` 返回 `{folderId,sentFolderId,messages,replyTarget}`，`messages` 按时间升序（上限 200）；
+  每封带 `folderId`，前端据此标出「已发送」。
+- `replyTarget` = `{messageId,subject,to,cc}`：会话里默认要回复的那封（最新一封非已发送）及其默认收件人，
+  已剔除自己的地址；无可用收件人时该字段缺省。
+
+### 5.1.1 搜索
+
+`GET /mail/search?q=<词>&folder=<id>&limit=<n>`：
+
+- 默认搜**整个账号**（不是只搜当前文件夹）；传 `folder` 时限定到该文件夹，
+  不属于自己的 folder 返回 `404`。
+- 匹配字段：`subject`、`from_addr`、`from_name`、`to_addr`、`cc_addr`、`body_text`，
+  大小写不敏感，`%`/`_` 按字面量处理（`ESCAPE '\'`）。
+- 结果 `{query,total,hits:[{id,folderId,folderName,key,subject,fromName,fromAddr,to,date,isRead,preview}]}`，
+  `key` 是 base64url 的会话 key，前端点击后直接开该会话（跨文件夹也能开）。
+- 空 `q` 返回空结果（`200`），不当错误。
+
+### 5.1.2 回复
+
+`POST /mail/reply`：
+
+- 默认（`replyAll=false`）只发给原信发件人；`true` 时再加上原信 To/Cc 的其他参与者，
+  自动剔除自己的主地址与别名，去重后 To 优先、其余进 Cc。
+- 传入 `to` / `cc` 数组时直接使用它们（用户在前端改了收件人）：同样会去掉自己的地址与重复项，
+  清理后 To 为空返回 `400`，收件人总数上限 50，地址不含 `@` 返回 `400`。
+- 原信 MIME 里取不到地址时回退到 `messages.from_addr` / `to_addr` / `cc_addr` 索引列。
+- 生成纯文本 MIME（base64 正文），带上 `In-Reply-To` 与最近 10 个 `References`，
+  主题缺省补 `Re:`；`conversation_id` 由同一套规则推导，因此回复落在原会话里。
+- 先写已发送副本，再投递：本地收件人走 `deliver.ToUser`，外域走 `smtp.Sender`，
+  投递失败进 `outbound` 队列并返回 `502`（响应 `{ok,queued}`）。
+- 只能回复自己的邮件（`messages.user_id` 不匹配返回 `404`）。
 
 ### 5.2 日历
 
@@ -203,6 +239,13 @@ func (s *Store) EventsByFolderBetween(folderID, from, to int64) ([]*Event, error
 
 - 会话列表项：未读圆点、参与者、主题、时间（Luxon 相对时间）、封数、附件图标。
 - 点击会话 → 阅读窗格加载 `thread`，按时间正序展示；进入即对未读消息调用 `read`。
+- 会话列表顶部有搜索框：**输入不触发请求**，回车或点「搜索」才发一次（服务端很轻量，
+  防抖自动搜索压力太大）；结果里每条带文件夹标签，点击直接打开会话（不受当前文件夹限制）。
+- 阅读窗格底部是**聊天式回复区**（与会话连在一起，不再弹窗）：
+  - 工具栏：当前回复对象（默认= 原发件人 + 原信 To/Cc，点开可编辑 To/Cc），以及「仅发件人」「全部回复」快捷切换；
+  - 输入框：Enter 发送、Shift+Enter 换行，发送中禁用；主题自动为 `Re: 首封主题`，不需手填；
+  - 发送成功后清空输入、刷新列表与会话，新副本带「已发送」标记。
+- 会话内的消息带上「已发送」小标记（`folderId === sentFolderId`），区分自己发出的那些。
 - HTML 正文用 `<iframe sandbox srcdoc>`（无 `allow-scripts`）渲染，保留内联样式、禁用脚本；无 HTML 时用 `whitespace-pre-wrap` 展示纯文本。
 - 附件按 `attachments` 元数据渲染，下载走 API。
 - 移动端：列表与阅读用单栏切换（返回按钮）。
@@ -242,10 +285,13 @@ func (s *Store) EventsByFolderBetween(folderID, from, to int64) ([]*Event, error
 - `go test ./internal/store/`：新增会话聚合、联系人搜索、事件区间测试。
 - `go test ./cmd/lifemail/`：路由与静态服务（`/` 302、`/app/login/`、`/admin/users/`、`/api/user/session`）。
 - `go test ./internal/api/`：登录成功/失败/限流、越权访问他人在资源（folder/message/contact）返回 404。
+- 回复：`TestUserReply` 覆盖回复全部（To/Cc 剔除自己、本地投递到两位收件人、已发送副本与会话归并、跨账号 404），
+  `TestBareAddress` 覆盖收件人地址规范化。
 - `cd web && pnpm run check`：类型检查。
 - 手工验收（`make build` + 本地运行）：
   1. `/` 跳转到 `/app/`，`/app/login/` 用账号密码登录，刷新保持登录；
   2. 收件箱按会话分组，封数与未读数正确；打开后变已读；
+  3. 回复/全部回复发出后，已发送副本出现在同一会话并标「已发送」;
   3. 附件可下载；HTML 正文不执行脚本；
   4. 新建日历后出现在列表，重命名保留 UUID（订阅链接不变）；
   5. 联系人可搜索、可看详情；

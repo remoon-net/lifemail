@@ -54,3 +54,19 @@ export function initials(value: string): string {
 	if (!trimmed) return '?';
 	return trimmed.slice(0, 1).toUpperCase();
 }
+
+/**
+ * Renders a header-style address list for display, dropping the angle brackets
+ * that appear around bare addresses (`<a@b>` → `a@b`).
+ */
+export function addressList(value: string): string {
+	return value
+		.split(',')
+		.map((item) => {
+			const trimmed = item.trim();
+			const bare = /^<([^<>]+)>$/.exec(trimmed);
+			return bare ? bare[1] : trimmed;
+		})
+		.filter((item) => item !== '')
+		.join('、');
+}

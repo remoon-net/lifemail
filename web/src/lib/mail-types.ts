@@ -51,6 +51,29 @@ export type MailMessage = {
 	attachments: Attachment[];
 };
 
+/** Default reply offered at the bottom of a conversation. */
+export type ReplyTarget = {
+	messageId: number;
+	subject: string;
+	to: string[];
+	cc: string[];
+};
+
+/** One webmail search result. */
+export type MailSearchHit = {
+	id: number;
+	folderId: number;
+	folderName: string;
+	key: string;
+	subject: string;
+	fromName: string;
+	fromAddr: string;
+	to: string;
+	date: number;
+	isRead: boolean;
+	preview: string;
+};
+
 export type CalendarRow = {
 	id: number;
 	name: string;

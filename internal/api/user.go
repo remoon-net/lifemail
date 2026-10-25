@@ -19,6 +19,7 @@ import (
 
 	"remoon.net/lifemail/internal/authlimit"
 	"remoon.net/lifemail/internal/httpx"
+	"remoon.net/lifemail/internal/smtp"
 	"remoon.net/lifemail/internal/store"
 )
 
@@ -39,6 +40,12 @@ type User struct {
 	// webmail login is disabled (the Basic-auth /api/me surface still works).
 	Token       string
 	AuthLimiter *authlimit.Limiter
+	// Sender delivers replies to external recipients. Optional: without it,
+	// replies to outside addresses are refused.
+	Sender *smtp.Sender
+	// IsLocalDomain reports whether a domain is hosted here, so replies to
+	// unknown local mailboxes can be rejected instead of queued.
+	IsLocalDomain func(string) bool
 	// BaseURL is prepended to public calendar feed URLs.
 	BaseURL string
 	Version string
@@ -67,6 +74,10 @@ func (h *User) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.conversations(w, r, user)
 	case path == "/mail/thread":
 		h.thread(w, r, user)
+	case path == "/mail/reply":
+		h.reply(w, r, user)
+	case path == "/mail/search":
+		h.searchMail(w, r, user)
 	case strings.HasPrefix(path, "/mail/messages/"):
 		h.message(w, r, user, strings.TrimPrefix(path, "/mail/messages/"))
 	case strings.HasPrefix(path, "/mail/attachments/"):
@@ -325,7 +336,7 @@ func (h *User) conversations(w http.ResponseWriter, r *http.Request, user *store
 		return
 	}
 	limit := queryInt(r, "limit", 50)
-	sums, err := h.Store.ConversationSummaries(folder.ID, limit)
+	sums, err := h.Store.ConversationSummaries(user.ID, folder.ID, limit)
 	if err != nil {
 		h.logError("cannot list conversations", err)
 		writeJSONError(w, http.StatusInternalServerError, "cannot list conversations")
@@ -381,7 +392,7 @@ func (h *User) thread(w http.ResponseWriter, r *http.Request, user *store.User) 
 		writeJSONError(w, http.StatusBadRequest, "invalid conversation key")
 		return
 	}
-	messages, err := h.Store.ConversationMessages(folder.ID, key, 200)
+	messages, err := h.Store.ConversationMessages(user.ID, key, folder.ID, 200)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeJSONError(w, http.StatusNotFound, "conversation not found")
@@ -404,7 +415,78 @@ func (h *User) thread(w http.ResponseWriter, r *http.Request, user *store.User) 
 		}
 		out = append(out, view)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"folderId": folder.ID, "messages": out})
+	sentID := int64(0)
+	if sent, err := h.Store.FolderByType(user.ID, 5); err == nil {
+		sentID = sent.ID
+	}
+	payload := map[string]any{
+		"folderId": folder.ID, "sentFolderId": sentID, "messages": out,
+	}
+	if target := h.replyTargetFor(user, messages, sentID); target != nil {
+		payload["replyTarget"] = target
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// searchMail serves GET /mail/search?q=&folder=&limit=. The search covers every
+// folder of the account unless folder is given.
+func (h *User) searchMail(w http.ResponseWriter, r *http.Request, user *store.User) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"query": "", "total": 0, "hits": []any{},
+		})
+		return
+	}
+	folderID := int64(queryInt(r, "folder", 0))
+	if folderID > 0 {
+		folder, err := h.Store.FolderByID(folderID)
+		if err != nil || folder.UserID != user.ID || folder.Deleted {
+			writeJSONError(w, http.StatusNotFound, "folder not found")
+			return
+		}
+	}
+	limit := queryInt(r, "limit", 50)
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	hits, total, err := h.Store.SearchMail(user.ID, query, folderID, limit, 0)
+	if err != nil {
+		h.logError("cannot search messages", err)
+		writeJSONError(w, http.StatusInternalServerError, "cannot search messages")
+		return
+	}
+	type hit struct {
+		ID         int64  `json:"id"`
+		FolderID   int64  `json:"folderId"`
+		FolderName string `json:"folderName"`
+		Key        string `json:"key"`
+		Subject    string `json:"subject"`
+		FromName   string `json:"fromName"`
+		FromAddr   string `json:"fromAddr"`
+		To         string `json:"to"`
+		Date       int64  `json:"date"`
+		IsRead     bool   `json:"isRead"`
+		Preview    string `json:"preview"`
+	}
+	out := make([]hit, 0, len(hits))
+	for _, item := range hits {
+		m := item.Message
+		out = append(out, hit{
+			ID: m.ID, FolderID: m.FolderID, FolderName: item.FolderName,
+			Key: encodeKey(item.ConversationKey), Subject: m.Subject,
+			FromName: m.FromName, FromAddr: m.FromAddr, To: m.ToAddr,
+			Date: m.DateReceived, IsRead: m.IsRead, Preview: item.Preview,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"query": query, "total": total, "hits": out,
+	})
 }
 
 func (h *User) message(w http.ResponseWriter, r *http.Request, user *store.User, rest string) {

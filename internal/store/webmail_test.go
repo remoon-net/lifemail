@@ -53,7 +53,7 @@ func TestConversationSummariesGroupByThread(t *testing.T) {
 	db, user, inbox, sent := mailFixture(t)
 
 	insertTestMessage(t, db, &Message{
-		UserID: user.ID, FolderID: inbox.ID, Subject: "Re: 合同",
+		UserID: user.ID, FolderID: inbox.ID, Subject: "合同",
 		FromName: "张三", FromAddr: "z@example.com", ToAddr: user.Address,
 		DateReceived: 100, ConversationID: "ref:a@x", IsRead: true,
 		BodyText: "第一批\n附件见上",
@@ -74,50 +74,69 @@ func TestConversationSummariesGroupByThread(t *testing.T) {
 		FromName: "赵六", FromAddr: "zh@example.com", ToAddr: user.Address,
 		DateReceived: 150,
 	})
-	// Another folder must not leak into the inbox thread list.
+	// A reply stored in Sent joins the same conversation.
 	insertTestMessage(t, db, &Message{
 		UserID: user.ID, FolderID: sent.ID, Subject: "Re: 合同",
-		DateReceived: 400, ConversationID: "ref:a@x",
+		FromName: "Alice", FromAddr: user.Address, ToAddr: "l@example.com",
+		DateReceived: 400, ConversationID: "ref:a@x", IsRead: true,
+		BodyText: "好的，确认",
 	})
 
-	sums, err := db.ConversationSummaries(inbox.ID, 50)
+	sums, err := db.ConversationSummaries(user.ID, inbox.ID, 50)
 	if err != nil {
 		t.Fatalf("summaries: %v", err)
 	}
 	if len(sums) != 3 {
 		t.Fatalf("summaries = %d, want 3", len(sums))
 	}
-	// Newest thread first: 周报 (300), 无会话标识 (150), 合同 (200) — actually
-	// 合同's latest is 200, so order is 300, 200, 150.
-	if sums[0].Key != "ref:b@x" || sums[0].Count != 1 || sums[0].Unread != 1 {
-		t.Fatalf("first summary = %+v", sums[0])
+	// The sent reply makes 合同 the newest thread (400), then 周报 (300).
+	if sums[0].Key != "ref:a@x" {
+		t.Fatalf("first summary key = %q, want ref:a@x", sums[0].Key)
 	}
-	if sums[1].Key != "ref:a@x" {
-		t.Fatalf("second summary key = %q, want ref:a@x", sums[1].Key)
+	if sums[0].Count != 3 || sums[0].Unread != 1 {
+		t.Fatalf("thread count/unread = %d/%d, want 3/1", sums[0].Count, sums[0].Unread)
 	}
-	if sums[1].Count != 2 || sums[1].Unread != 1 {
-		t.Fatalf("thread count/unread = %d/%d, want 2/1", sums[1].Count, sums[1].Unread)
+	if !sums[0].HasInbox || !sums[0].HasSent {
+		t.Fatalf("thread should span inbox and sent: %+v", sums[0])
 	}
-	if sums[1].FromName != "李四" || !sums[1].HasAttachments {
-		t.Fatalf("thread should describe its latest message: %+v", sums[1])
+	if sums[0].FromName != "Alice" || sums[0].Preview != "好的，确认" {
+		t.Fatalf("thread should describe its latest message: %+v", sums[0])
 	}
-	if sums[1].Preview != "收到，明天回复。" {
-		t.Fatalf("preview = %q", sums[1].Preview)
+	// The thread keeps the subject of its oldest message, not the "Re:" reply.
+	if sums[0].Subject != "合同" {
+		t.Fatalf("thread subject = %q, want the oldest message's subject", sums[0].Subject)
+	}
+	if sums[1].Key != "ref:b@x" || sums[1].Count != 1 || sums[1].Unread != 1 {
+		t.Fatalf("second summary = %+v", sums[1])
 	}
 	wantKey := "m:" + itoa(lonely.ID)
 	if sums[2].Key != wantKey {
 		t.Fatalf("fallback key = %q, want %q", sums[2].Key, wantKey)
 	}
 
-	thread, err := db.ConversationMessages(inbox.ID, "ref:a@x", 50)
+	// The Sent view only shows threads that contain a sent message.
+	sentSums, err := db.ConversationSummaries(user.ID, sent.ID, 50)
+	if err != nil {
+		t.Fatalf("sent summaries: %v", err)
+	}
+	if len(sentSums) != 1 || sentSums[0].Key != "ref:a@x" {
+		t.Fatalf("sent summaries = %+v", sentSums)
+	}
+
+	thread, err := db.ConversationMessages(user.ID, "ref:a@x", inbox.ID, 50)
 	if err != nil {
 		t.Fatalf("thread: %v", err)
 	}
-	if len(thread) != 2 || thread[0].DateReceived != 100 || thread[1].DateReceived != 200 {
+	if len(thread) != 3 || thread[0].DateReceived != 100 ||
+		thread[1].DateReceived != 200 || thread[2].DateReceived != 400 {
 		t.Fatalf("thread order = %+v", thread)
 	}
+	if thread[2].FolderID != sent.ID {
+		t.Fatalf("reply is not marked as sent: %+v", thread[2])
+	}
 
-	single, err := db.ConversationMessages(inbox.ID, wantKey, 50)
+	// The fallback key is readable from either side of the shared scope.
+	single, err := db.ConversationMessages(user.ID, wantKey, sent.ID, 50)
 	if err != nil {
 		t.Fatalf("fallback thread: %v", err)
 	}
@@ -125,9 +144,13 @@ func TestConversationSummariesGroupByThread(t *testing.T) {
 		t.Fatalf("fallback thread = %+v", single)
 	}
 
-	// A key from another folder must not resolve.
-	if _, err := db.ConversationMessages(sent.ID, wantKey, 50); err == nil {
-		t.Fatal("fallback key resolved in the wrong folder")
+	// Other folders stay isolated: the fallback key is not visible in Spam.
+	spam, err := db.FolderByType(user.ID, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ConversationMessages(user.ID, wantKey, spam.ID, 50); err == nil {
+		t.Fatal("fallback key resolved outside the inbox/sent scope")
 	}
 }
 
@@ -243,4 +266,66 @@ func itoa(v int64) string {
 		v /= 10
 	}
 	return string(buf[i:])
+}
+
+func TestSearchMailSpansFolders(t *testing.T) {
+	db, user, inbox, sent := mailFixture(t)
+
+	insertTestMessage(t, db, &Message{
+		UserID: user.ID, FolderID: inbox.ID, Subject: "季度报告",
+		FromName: "张三", FromAddr: "z@example.com", ToAddr: user.Address,
+		ConversationID: "ref:q@x", DateReceived: 100,
+		BodyText: "请查收附件，下周开会讨论。",
+	})
+	insertTestMessage(t, db, &Message{
+		UserID: user.ID, FolderID: sent.ID, Subject: "Re: 季度报告",
+		FromName: "Alice", FromAddr: user.Address, ToAddr: "z@example.com",
+		ConversationID: "ref:q@x", DateReceived: 200, IsRead: true,
+		BodyText: "收到，我会准备材料。",
+	})
+	insertTestMessage(t, db, &Message{
+		UserID: user.ID, FolderID: inbox.ID, Subject: "会议纪要",
+		FromName: "李四", FromAddr: "li@example.com", ToAddr: user.Address,
+		ConversationID: "ref:m@x", DateReceived: 300,
+		BodyText: "纪要见正文。",
+	})
+
+	// The body match reaches both folders.
+	hits, total, err := db.SearchMail(user.ID, "准备材料", 0, 20, 0)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if total != 1 || len(hits) != 1 {
+		t.Fatalf("body search = %d hits (total %d)", len(hits), total)
+	}
+	if hits[0].Message.FolderID != sent.ID {
+		t.Fatalf("hit folder = %d, want sent", hits[0].Message.FolderID)
+	}
+	if hits[0].FolderName == "" || hits[0].ConversationKey != "ref:q@x" {
+		t.Fatalf("hit metadata = %+v", hits[0])
+	}
+
+	// Subject and recipient matches are covered too.
+	for _, term := range []string{"季度", "li@example.com"} {
+		if _, total, err := db.SearchMail(user.ID, term, 0, 20, 0); err != nil || total == 0 {
+			t.Fatalf("search %q: total %d, err %v", term, total, err)
+		}
+	}
+
+	// Limiting to one folder hides the other one.
+	hits, total, err = db.SearchMail(user.ID, "季度", inbox.ID, 20, 0)
+	if err != nil {
+		t.Fatalf("scoped search: %v", err)
+	}
+	if total != 1 || len(hits) != 1 || hits[0].Message.FolderID != inbox.ID {
+		t.Fatalf("scoped hits = %+v (total %d)", hits, total)
+	}
+
+	// Wildcards in the term are literal, and an empty term matches nothing.
+	if _, total, err := db.SearchMail(user.ID, "%", 0, 20, 0); err != nil || total != 0 {
+		t.Fatalf("wildcard search: total %d, err %v", total, err)
+	}
+	if hits, total, err := db.SearchMail(user.ID, "  ", 0, 20, 0); err != nil || total != 0 || len(hits) != 0 {
+		t.Fatalf("empty search: %d hits (total %d), err %v", len(hits), total, err)
+	}
 }

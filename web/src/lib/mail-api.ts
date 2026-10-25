@@ -7,6 +7,8 @@ import type {
 	EventInput,
 	MailFolder,
 	MailMessage,
+	MailSearchHit,
+	ReplyTarget,
 	UserProfile
 } from './mail-types';
 
@@ -80,12 +82,31 @@ export const mailApi = {
 			`/mail/conversations?limit=${limit}${folderId ? `&folder=${folderId}` : ''}`
 		),
 	thread: (folderId: number, key: string) =>
-		request<{ folderId: number; messages: MailMessage[] }>(
-			`/mail/thread?folder=${folderId}&key=${encodeURIComponent(key)}`
-		),
+		request<{
+			folderId: number;
+			sentFolderId: number;
+			messages: MailMessage[];
+			replyTarget?: ReplyTarget;
+		}>(`/mail/thread?folder=${folderId}&key=${encodeURIComponent(key)}`),
 	message: (id: number) => request<{ message: MailMessage }>(`/mail/messages/${id}`),
 	markRead: (id: number) =>
 		request<{ ok: boolean; read: boolean }>(`/mail/messages/${id}/read`, { method: 'POST' }),
+	search: (query: string, folderId?: number | null, limit = 50) =>
+		request<{ query: string; total: number; hits: MailSearchHit[] }>(
+			`/mail/search?q=${encodeURIComponent(query)}&limit=${limit}` +
+				(folderId ? `&folder=${folderId}` : '')
+		),
+	reply: (input: {
+		messageId: number;
+		body: string;
+		subject: string;
+		to: string[];
+		cc: string[];
+	}) =>
+		request<{ ok: boolean; queued: boolean }>('/mail/reply', {
+			method: 'POST',
+			...json(input)
+		}),
 	attachmentUrl: (id: number) => `${PREFIX}/mail/attachments/${id}`,
 
 	calendars: () => request<{ calendars: CalendarRow[] }>('/calendars'),
