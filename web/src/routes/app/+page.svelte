@@ -323,8 +323,9 @@
 	}
 
 	function onReplyKeydown(event: KeyboardEvent) {
-		// Enter sends, Shift+Enter breaks the line; never send mid-composition.
-		if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+		// Ctrl/⌘+Enter sends; a plain Enter breaks the line, so a half-written
+		// mail is never sent by accident (there is no unsend here).
+		if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
 			event.preventDefault();
 			void sendReply();
 		}
@@ -697,7 +698,7 @@
 						onkeydown={onReplyKeydown}
 					></textarea>
 					<p class="muted mt-1 text-[10px]">
-						Enter 发送 · Shift+Enter 换行 · 主题 {replyTarget.subject}
+						Ctrl/⌘+Enter 发送 · Enter 换行 · 主题 {replyTarget.subject}
 					</p>
 				{:else}
 					<p class="muted text-[11px]">这个会话没有可回复的地址。</p>

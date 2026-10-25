@@ -4,6 +4,13 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-10-26
+
+### Changed
+
+- 回复框快捷键改为 `Ctrl/⌘+Enter` 发送、`Enter` 换行，避免写多段正文时误发
+  （邮件发出后无法撤回）
+
 ## [0.2.0] - 2026-10-26
 
 ### Added
