@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { onMount, type Snippet } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	const base = (resolve as (path: string) => string)('/admin');
@@ -13,6 +13,19 @@
 
 	let { children }: { children: Snippet } = $props();
 	let mobileOpen = $state(false);
+
+	// The operator session is only checked on this surface: the account UI
+	// under /app has its own cookie, and the admin API may not even be routed
+	// on the public host.
+	onMount(() => {
+		void session.boot();
+		const onUnauthorized = () => {
+			session.markUnauthenticated();
+			void goto(`${base}/login/`);
+		};
+		window.addEventListener('lifemail:unauthorized', onUnauthorized);
+		return () => window.removeEventListener('lifemail:unauthorized', onUnauthorized);
+	});
 
 	const nav: Array<{ href: string; label: string; icon: IconName; group: string }> = [
 		{ href: '/', label: '概览', icon: 'dashboard', group: '监控' },

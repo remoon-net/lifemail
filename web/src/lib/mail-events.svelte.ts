@@ -7,6 +7,8 @@
  * a new inbox message. The stream costs one idle connection per tab and no
  * polling, so keep it open for the whole authenticated session.
  */
+import { mailApi, MailApiError } from './mail-api';
+
 export type MailEvent = {
 	kind: string;
 	action?: string;
@@ -112,9 +114,35 @@ class MailEventStore {
 		clearTimeout(this.#timer);
 		const delay = Math.min(MAX_RETRY, MIN_RETRY * 2 ** this.#attempt);
 		this.#attempt += 1;
-		this.#timer = setTimeout(() => {
-			if (!this.#stopped && !this.#source) this.#open();
-		}, delay);
+		this.#timer = setTimeout(() => void this.#reconnect(), delay);
+	}
+
+	async #reconnect(): Promise<void> {
+		if (this.#stopped || this.#source) return;
+		// A closed stream is usually an expired or revoked session, which
+		// EventSource cannot report. Ask once before retrying, so a dead cookie
+		// does not knock on the endpoint forever.
+		try {
+			const info = await mailApi.session();
+			if (!info.authenticated) {
+				this.#expire();
+				return;
+			}
+		} catch (err) {
+			if (err instanceof MailApiError && err.status === 401) {
+				this.#expire();
+				return;
+			}
+			// Server restarting or a proxy error: keep backing off.
+		}
+		if (this.#stopped || this.#source) return;
+		this.#open();
+	}
+
+	/** Ends the stream and lets the layout send the user back to the login. */
+	#expire(): void {
+		this.stop();
+		window.dispatchEvent(new CustomEvent('lifemail:user-unauthorized'));
 	}
 }
 
