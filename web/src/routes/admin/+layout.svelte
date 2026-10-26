@@ -56,8 +56,11 @@
 		return titles[path === '' ? '/' : path] ?? titles['/'];
 	});
 
+	const relative = $derived(page.url.pathname.slice(base.length).replace(/\/+$/, ''));
+	const isLogin = $derived(relative === '/login');
+
 	$effect(() => {
-		if (session.ready && !session.authenticated) {
+		if (session.ready && !session.authenticated && !isLogin) {
 			void goto(`${base}/login/`);
 		}
 	});
@@ -75,10 +78,12 @@
 </script>
 
 <svelte:head>
-	<title>{current.title} · lifemail</title>
+	<title>{isLogin ? '登录' : current.title} · lifemail</title>
 </svelte:head>
 
-{#if !session.ready}
+{#if isLogin}
+	{@render children()}
+{:else if !session.ready}
 	<div class="mx-auto max-w-5xl px-6 py-16">
 		<Skeleton rows={6} />
 	</div>
