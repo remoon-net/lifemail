@@ -53,7 +53,7 @@ schema 唯一来源是 `internal/store/migrations/NNNN_name.<dialect>.sql`，由
 
 ```bash
 make verify       # 收尾时跑一次：gofmt + vet + svelte-check + go test ./...
-make build        # 前端构建 + 静态编译（只在需要产物时跑）
+make build        # 只在需要静态产物或镜像时跑；不要用来“看一眼界面”
 ```
 
 **检查只跑一遍。** 改动完成后跑一次 `make verify`，通过就直接提交；
@@ -76,6 +76,15 @@ cd web && pnpm run check        # 只做前端类型检查
 
 ## 5. 前端
 
+- **看效果必须用开发服务器，不要用 build 代替 dev。** 先让后端监听（默认 `:8080`，
+  本项目 `.env` 是 `:8083`），再执行：
+  ```bash
+  LIFEMAIL_DEV_API=http://127.0.0.1:8083 pnpm --dir web run dev
+  # 或 make dev-web（默认 8080，可用 LIFEMAIL_DEV_API 覆盖）
+  ```
+  浏览器打开 `http://localhost:5173`，Vite 会把 `/api` 反代到后端，改动即时热更新。
+- `pnpm run build` / `make build` 只用于出静态产物、镜像，或专门验证生产构建
+  （CSP、资源哈希、adapter-static）时；**不要为了预览界面跑 build**。
 - SvelteKit **3**：`#lib` 而不是 `$lib`；`tsconfig.json` 必须 `extends: "$app/tsconfig"`；
   `$app/paths` 只导出 `resolve` / `asset` / `base`；`$app/state` 提供 `page`。
 - 类型检查用 `cd web && pnpm run check`，不要靠 `vite build` 代替。

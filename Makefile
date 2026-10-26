@@ -4,7 +4,7 @@ GOARCH  ?= amd64
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build gobuild web check test verify vet fmt image clean db-status
+.PHONY: build gobuild web check test verify vet fmt image clean db-status dev-web
 
 # Build the UI into web/build. It is served from disk at runtime
 # (LIFEMAIL_WEB_DIR), not embedded in the binary.
@@ -41,6 +41,10 @@ image: build
 
 db-status:
 	./$(BINARY) db status
+
+# 前端开发服务器：Vite 反代后端。后端默认 :8080，可用 LIFEMAIL_DEV_API 覆盖。
+dev-web:
+	cd web && LIFEMAIL_DEV_API=$${LIFEMAIL_DEV_API:-http://127.0.0.1:8080} pnpm run dev
 
 clean:
 	rm -f $(BINARY)
