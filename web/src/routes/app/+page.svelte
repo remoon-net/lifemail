@@ -1074,12 +1074,18 @@
 									onclick={() => openHit(hit)}
 								>
 									<div class="flex items-baseline gap-2">
-										<span
-											class="min-w-0 flex-1 truncate text-[13px] {hit.isRead
-												? 'font-medium'
-												: 'font-semibold'}"
-											>{hit.fromName || hit.fromAddr}</span
-										>
+										<div class="flex min-w-0 flex-1 items-baseline gap-1.5">
+											<span
+												class="max-w-[60%] min-w-0 truncate text-[13px] {hit.isRead
+													? 'font-medium'
+													: 'font-semibold'}">{hit.fromName || hit.fromAddr}</span
+											>
+											{#if hit.fromName && hit.fromAddr}
+												<span class="muted min-w-0 truncate text-[11px]" title={hit.fromAddr}>
+													{hit.fromAddr}
+												</span>
+											{/if}
+										</div>
 										<span class="muted shrink-0 text-[11px]">{listTime(hit.date)}</span>
 									</div>
 									<div class="mt-0.5 flex items-center gap-1.5">
@@ -1120,11 +1126,22 @@
 									{#if conversation.unread > 0}
 										<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600"></span>
 									{/if}
-									<span
-										class="min-w-0 flex-1 truncate text-[13px] {conversation.unread > 0
-											? 'font-semibold'
-											: 'font-medium'}">{conversation.from.name || conversation.from.address}</span
-									>
+									<div class="flex min-w-0 flex-1 items-baseline gap-1.5">
+										<span
+											class="max-w-[60%] min-w-0 truncate text-[13px] {conversation.unread > 0
+												? 'font-semibold'
+												: 'font-medium'}">{conversation.from.name ||
+												conversation.from.address}</span
+										>
+										{#if conversation.from.name && conversation.from.address}
+											<span
+												class="muted min-w-0 truncate text-[11px]"
+												title={conversation.from.address}
+											>
+												{conversation.from.address}
+											</span>
+										{/if}
+									</div>
 									<span class="muted shrink-0 text-[11px]">{listTime(conversation.lastAt)}</span>
 								</div>
 								<div class="mt-0.5 flex items-center gap-1.5">

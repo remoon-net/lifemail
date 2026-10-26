@@ -99,8 +99,9 @@ func TestConversationSummariesGroupByThread(t *testing.T) {
 	if !sums[0].HasInbox || !sums[0].HasSent {
 		t.Fatalf("thread should span inbox and sent: %+v", sums[0])
 	}
-	if sums[0].FromName != "Alice" || sums[0].Preview != "好的，确认" {
-		t.Fatalf("thread should describe its latest message: %+v", sums[0])
+	if sums[0].FromName != "李四" || sums[0].Preview != "好的，确认" {
+		t.Fatalf("thread should name its newest inbound sender but preview the latest message: %+v",
+			sums[0])
 	}
 	// The thread keeps the subject of its oldest message, not the "Re:" reply.
 	if sums[0].Subject != "合同" {

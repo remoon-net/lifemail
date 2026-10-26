@@ -617,6 +617,9 @@ func TestUserReply(t *testing.T) {
 			Key    string `json:"key"`
 			Count  int    `json:"count"`
 			Unread int    `json:"unread"`
+			From   struct {
+				Address string `json:"address"`
+			} `json:"from"`
 		} `json:"conversations"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
@@ -627,6 +630,11 @@ func TestUserReply(t *testing.T) {
 	}
 	if listing.Conversations[0].Count != 2 || listing.Conversations[0].Unread != 1 {
 		t.Fatalf("conversation = %+v", listing.Conversations[0])
+	}
+	// The reply is the newest message, but the list still names who wrote in.
+	if listing.Conversations[0].From.Address != "bob@example.com" {
+		t.Fatalf("conversation sender = %q, want bob@example.com",
+			listing.Conversations[0].From.Address)
 	}
 
 	rec = userDo(h, http.MethodGet,

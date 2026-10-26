@@ -237,15 +237,19 @@ func (s *Store) ConversationSummaries(userID string, folderID int64, limit int) 
 		Key      string `db:"cid"`
 		LastAt   int64  `db:"last_at"`
 		LatestID int64  `db:"latest_id"`
-		Total    int    `db:"total"`
-		Unread   int    `db:"unread"`
-		HasInbox int    `db:"has_inbox"`
-		HasSent  int    `db:"has_sent"`
+		// PeerID is the newest message that did not come from the account
+		// itself, so a thread still names its counterpart after a reply.
+		PeerID   int64 `db:"peer_id"`
+		Total    int   `db:"total"`
+		Unread   int   `db:"unread"`
+		HasInbox int   `db:"has_inbox"`
+		HasSent  int   `db:"has_sent"`
 	}
 
 	query := `SELECT ` + conversationKeyExpr + ` AS cid,
 		        MAX(date_received) AS last_at,
 		        MAX(id) AS latest_id,
+		        MAX(CASE WHEN folder_id = ? THEN 0 ELSE id END) AS peer_id,
 		        COUNT(*) AS total,
 		        COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread,
 		        MAX(CASE WHEN folder_id = ? THEN 1 ELSE 0 END) AS has_inbox,
@@ -253,7 +257,7 @@ func (s *Store) ConversationSummaries(userID string, folderID int64, limit int) 
 		 FROM messages
 		 WHERE user_id = ? AND deleted = 0 AND folder_id IN (?)
 		 GROUP BY ` + conversationKeyExpr
-	args := []any{inbox, sent, userID, scope}
+	args := []any{sent, inbox, sent, userID, scope}
 	if crossFolder && folderID == inbox {
 		query += ` HAVING MAX(CASE WHEN folder_id = ? THEN 1 ELSE 0 END) = 1`
 		args = append(args, inbox)
@@ -276,9 +280,12 @@ func (s *Store) ConversationSummaries(userID string, folderID int64, limit int) 
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	ids := make([]int64, 0, len(rows))
+	ids := make([]int64, 0, len(rows)*2)
 	for _, r := range rows {
 		ids = append(ids, r.LatestID)
+		if r.PeerID != 0 && r.PeerID != r.LatestID {
+			ids = append(ids, r.PeerID)
+		}
 	}
 	latest, err := s.messagesByID(ids)
 	if err != nil {
@@ -297,11 +304,19 @@ func (s *Store) ConversationSummaries(userID string, folderID int64, limit int) 
 		}
 		if m := latest[r.LatestID]; m != nil {
 			c.Subject = m.Subject
-			c.FromName = m.FromName
-			c.FromAddr = m.FromAddr
 			c.ToAddr = m.ToAddr
 			c.Preview = previewText(m.BodyText, 140)
 			c.HasAttachments = m.HasAttachments
+		}
+		// The sender is the counterpart, not whoever wrote last: a thread whose
+		// newest message is my own reply must still show who mailed me.
+		sender := latest[r.LatestID]
+		if peer := latest[r.PeerID]; peer != nil {
+			sender = peer
+		}
+		if sender != nil {
+			c.FromName = sender.FromName
+			c.FromAddr = sender.FromAddr
 		}
 		// Replies carry a "Re:" prefix; the thread keeps the subject of its
 		// oldest message so the list does not churn on every reply.
