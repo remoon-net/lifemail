@@ -4,6 +4,27 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.7] - 2026-10-26
+
+### Added
+
+- 邮箱会话打开时默认滚到最新一封，并用 `ResizeObserver` 跟随 iframe 正文（图片、字
+体）
+  撑高继续贴底；向上滚动即停止贴底，不再把读者拽回底部
+- 新邮件属于当前打开的会话时，阅读器底部浮出「有新消息，点击加载」按钮；点击后调用
+  `GET /mail/thread?since=<最后一条消息 id>` 只取新到的消息并按 id 去重追加，不再重
+  载整个消息列表
+- `internal/store` 新增 `ConversationMessagesAfter`：按 `(date_received, id)` 游标
+  取会话增量；游标失效时回退整段会话，前端仍能收敛
+- SSE `mail` 事件新增 `conversationKey` 与 `messageId`；投递钩子
+  `deliver.InboxHook` / `deliver.NotifyInbox` 增加已落库的消息 id 与会话 id 参数
+
+### Changed
+
+- `POST /api/user/mail/reply` 现在返回已存入「已发送」的 `message` 与基于它计算的
+  `replyTarget`；前端回复成功后直接追加这条消息并就地更新会话条目（数量、预览、时
+  间），不再刷新会话列表、不再重开会话
+
 ## [0.3.6] - 2026-10-26
 
 ### Fixed
