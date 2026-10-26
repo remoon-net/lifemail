@@ -4,6 +4,17 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.6] - 2026-10-26
+
+### Fixed
+
+- 网页邮箱不再请求 `/api/admin/session`：管理员会话的启动与 401 跳转从根布局移到
+  `/admin` 布局。根布局由 `/admin`、`/app` 共用，之前每次打开邮箱都会多打一次管理员
+  接口；若反向代理对 `/api/admin/*` 返回 401，还会把正在用网页邮箱的用户跳到
+  `/admin/login`
+- SSE 流因会话失效被关闭时先用 `/api/user/session` 确认，未登录则结束流并回到邮箱
+  登录页，不再用失效 Cookie 无限重试
+
 ## [0.3.5] - 2026-10-26
 
 ### Added
