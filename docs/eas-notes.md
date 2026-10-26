@@ -99,6 +99,16 @@ EAS 只保存「规则 + 第一次时间」，展开由客户端完成。这一�
 - **添加参会人不发 `ResolveRecipients`**：忙闲条在这套客户端上没有入口
 - **没有「外出回复」UI**：`Settings/Oof` 只对其他客户端有意义
 - **转发带附件前必须先下载附件**：没下载过的附件，转发时只留文件名占位甚至完全不带
+- **会话聚合只按主题**：列表是本地 SQL `GROUP BY accountKey, chatkey` 聚合出来的，
+  `chatkey` 来自规范化主题（`Message.threadTopic`），**忽略服务端下发的 `ConversationId`
+  和 `ConversationIndex`**。实测两个不同发件人、不同 `Message-ID`、两个会话字段都不
+  同的邮件，只要主题一样就会被并成一条（列表标题显示「test, test2」）；把
+  `ConversationId` 换成十六进制、补发 22 字节 `ConversationIndex`（Email2 页的 base64
+  二进制）后重新投递新邮件，仍然合并。所以这不是服务端 bug，别去改会话计算——要拆开
+  只能改主题或换客户端。
+- **已同步邮件基本不吃服务端 `Change`**：对已有邮件下发 `<Change>`（改主题）时，服务端
+  确认返回了变更项，客户端列表却没有变化。验证协议行为要用新投递的邮件，不要靠修改历史
+  邮件观察。
 - **从不发送**：`GetItemEstimate`、`GetAttachment`、`FolderCreate/FolderUpdate/FolderDelete`
 
 ---
