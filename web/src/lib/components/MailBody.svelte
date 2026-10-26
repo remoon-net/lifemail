@@ -22,6 +22,8 @@
 	table{max-width:100%;border-collapse:collapse}
 	blockquote{margin:0;padding-left:12px;border-left:2px solid #e4e4e7;color:#52525b}
 	pre{white-space:pre-wrap}
+	body > :first-child{margin-top:0}
+	body > :last-child{margin-bottom:0}
 </style></head><body>${html}</body></html>`);
 
 	function resize() {
@@ -30,9 +32,9 @@
 		if (!body || !frame) return;
 		// The body is height:auto, so its scrollHeight is the content height. The
 		// guard stops the resize observer from feeding its own output back in.
-		const height = Math.min(Math.ceil(body.scrollHeight) + 16, 20000);
+		const height = Math.min(Math.ceil(body.scrollHeight) + 4, 20000);
 		if (Math.abs((parseFloat(frame.style.height) || 0) - height) <= 2) return;
-		frame.style.height = `${Math.max(height, 60)}px`;
+		frame.style.height = `${Math.max(height, 24)}px`;
 	}
 
 	// A narrower viewport reflows the message, so the height has to follow the
@@ -58,7 +60,7 @@
 					setTimeout(resize, 300);
 				}}
 			class="w-full rounded-lg border-0 bg-white"
-			style="height: 60px"
+			style="height: 24px"
 		></iframe>
 	{:else}
 		<pre class="whitespace-pre-wrap break-words font-sans text-[13px] leading-6 text-zinc-700 dark:text-zinc-200"

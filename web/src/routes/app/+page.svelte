@@ -9,6 +9,7 @@
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import { mailApi } from '#lib/mail-api';
 	import { addressList, bytes, dateTime, relativeTime } from '#lib/format';
+	import { userSession } from '#lib/user-session.svelte';
 	import { toast } from '#lib/toast.svelte';
 	import { iconButton, textarea } from '#lib/ui';
 	import type { IconName } from '#lib/icons';
@@ -118,6 +119,35 @@
 
 	let currentFolder = $derived(folders.find((f) => f.id === folderId) ?? null);
 
+	// A thread is a conversation: my own messages sit on the right, everyone
+	// else on the left. Sent messages are identified by folder first (the
+	// account may send from an alias), with the primary address as a fallback.
+	let myAddress = $derived((userSession.profile?.address ?? '').toLowerCase());
+
+	function isOutgoing(message: MailMessage): boolean {
+		return (
+			message.folderId === sentFolderId ||
+			(myAddress !== '' && message.fromAddr.trim().toLowerCase() === myAddress)
+		);
+	}
+
+	// Everyone except me who wrote in this thread.
+	let otherSenders = $derived.by(() => {
+		const byAddress = new Map<string, { name: string; address: string }>();
+		for (const message of messages) {
+			if (isOutgoing(message)) continue;
+			const address = message.fromAddr.trim();
+			const key = address.toLowerCase();
+			if (key === '' || byAddress.has(key)) continue;
+			byAddress.set(key, { name: message.fromName.trim(), address });
+		}
+		return [...byAddress.values()];
+	});
+	// One counterpart: their identity lives in the thread header only. A second
+	// sender makes it ambiguous, so each message carries its own address.
+	let counterpart = $derived(otherSenders.length === 1 ? otherSenders[0] : null);
+	let multiSender = $derived(otherSenders.length > 1);
+
 	function rank(folder: MailFolder): number {
 		const index = ORDER.indexOf(folder.type);
 		return index < 0 ? ORDER.length + folder.id / 1e6 : index;
@@ -154,6 +184,42 @@
 			return `${date.getMonth() + 1}月${date.getDate()}日`;
 		}
 		return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+	}
+
+	/** Compact timestamp for a conversation bubble. */
+	function messageTime(unix: number): string {
+		const date = new Date(unix * 1000);
+		const now = new Date();
+		const time = date.toLocaleTimeString('zh-CN', {
+			hour: '2-digit',
+			minute: '2-digit',
+			hour12: false
+		});
+		if (date.toDateString() === now.toDateString()) return time;
+		if (date.getFullYear() === now.getFullYear()) {
+			return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
+		}
+		return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${time}`;
+	}
+
+	/** Hover text carrying the full header of one message. */
+	function messageDetails(message: MailMessage): string {
+		const lines = [
+			`发件人：${message.fromName ? `${message.fromName} <${message.fromAddr}>` : message.fromAddr}`
+		];
+		if (message.to) lines.push(`收件人：${addressList(message.to)}`);
+		if (message.cc) lines.push(`抄送：${addressList(message.cc)}`);
+		lines.push(`时间：${dateTime(message.date)}`);
+		if (message.folderId === sentFolderId) lines.push('状态：已发送');
+		return lines.join('\n');
+	}
+
+	/** Sender as "昵称 <邮箱>", or just the address when there is no nickname. */
+	function senderLabel(message: MailMessage): string {
+		const name = message.fromName.trim();
+		const address = message.fromAddr.trim();
+		if (name === '') return address;
+		return address === '' ? name : `${name} <${address}>`;
 	}
 
 	async function reloadFolders() {
@@ -525,6 +591,39 @@
 	<title>邮件 · lifemail</title>
 </svelte:head>
 
+{#snippet messageBody(message: MailMessage, corner: string)}
+	<article
+		class="w-full min-w-0 rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-xs dark:border-zinc-800 dark:bg-zinc-900/60 {corner}"
+	>
+		<MailBody html={message.bodyHtml} text={message.bodyText} />
+
+		{#if message.attachments.length > 0}
+			<div class="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+				<p class="muted mb-2 text-[11px] font-medium">
+					附件 · {message.attachments.length} 个
+				</p>
+				<ul class="flex flex-wrap gap-2">
+					{#each message.attachments as attachment (attachment.id)}
+						<li>
+							<a
+								href={mailApi.attachmentUrl(attachment.id)}
+								class="inline-flex max-w-full items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[12px] transition-colors hover:border-brand-300 hover:bg-brand-50 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10"
+								download={attachment.fileName}
+							>
+								<Icon name="paperclip" size={13} />
+								<span class="max-w-52 truncate font-medium"
+									>{attachment.fileName || '附件'}</span
+								>
+								<span class="muted shrink-0 text-[10px]">{bytes(attachment.size)}</span>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
+	</article>
+{/snippet}
+
 <!-- Mobile folder switcher -->
 <div class="mb-3 flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] lg:hidden">
 	{#each folders as folder (folder.id)}
@@ -815,8 +914,21 @@
 					</button>
 				<div class="min-w-0 flex-1">
 					<p class="truncate text-[13px] font-semibold">{selected.subject || '(无主题)'}</p>
-					<p class="muted text-[11px]">
-						{selected.count} 封 · {relativeTime(selected.lastAt)}
+					<p class="muted flex min-w-0 items-center gap-1.5 text-[11px]">
+						{#if counterpart}
+							<span class="inline-flex shrink-0 items-center gap-1">
+								<Icon name="user" size={11} />
+								<span
+									class="max-w-44 truncate font-medium text-zinc-600 dark:text-zinc-300"
+									>{counterpart.name || counterpart.address}</span
+								>
+							</span>
+							{#if counterpart.name && counterpart.address}
+								<span class="min-w-0 truncate opacity-70">&lt;{counterpart.address}&gt;</span>
+							{/if}
+							<span class="shrink-0 opacity-40">·</span>
+						{/if}
+						<span class="shrink-0">{selected.count} 封 · {relativeTime(selected.lastAt)}</span>
 					</p>
 				</div>
 			</header>
@@ -827,56 +939,47 @@
 				{:else}
 					<div class="space-y-4">
 						{#each messages as message (message.id)}
-							<article
-								class="rounded-xl border border-zinc-200 bg-white p-4 shadow-xs dark:border-zinc-800 dark:bg-zinc-900/60"
-							>
-								<header class="mb-3 flex flex-wrap items-start justify-between gap-2">
-									<div class="min-w-0">
-										<p class="text-[13px] font-semibold">
-											{message.fromName || message.fromAddr}
-											{#if message.folderId === sentFolderId}
-												<span class="muted ml-1 text-[10px] font-normal">已发送</span>
-											{/if}
-										</p>
-										<p class="muted truncate text-[11px]">{message.fromAddr}</p>
-										<p class="muted mt-0.5 truncate text-[11px]" title={message.to}>
-											收件人：{addressList(message.to)}
-										</p>
-									</div>
-									<time class="muted shrink-0 text-[11px]" title={dateTime(message.date)}
-										>{dateTime(message.date)}</time
+							{#if isOutgoing(message)}
+								<!-- 我发送的：靠右，信息备注靠右，时间在最右端 -->
+								<div
+									class="ml-auto flex w-fit max-w-[88%] flex-col items-end"
+									title={messageDetails(message)}
+								>
+									{@render messageBody(message, 'rounded-tr-md')}
+									<div
+										class="mt-1 flex w-full min-w-0 items-center justify-end gap-2 px-1 text-[11px] leading-4"
 									>
-								</header>
-
-								<MailBody html={message.bodyHtml} text={message.bodyText} />
-
-								{#if message.attachments.length > 0}
-									<div class="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-										<p class="muted mb-2 text-[11px] font-medium">
-											附件 · {message.attachments.length} 个
-										</p>
-										<ul class="flex flex-wrap gap-2">
-											{#each message.attachments as attachment (attachment.id)}
-												<li>
-													<a
-														href={mailApi.attachmentUrl(attachment.id)}
-														class="inline-flex max-w-full items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[12px] transition-colors hover:border-brand-300 hover:bg-brand-50 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10"
-														download={attachment.fileName}
-													>
-														<Icon name="paperclip" size={13} />
-														<span class="max-w-52 truncate font-medium"
-															>{attachment.fileName || '附件'}</span
-														>
-														<span class="muted shrink-0 text-[10px]"
-															>{bytes(attachment.size)}</span
-														>
-													</a>
-												</li>
-											{/each}
-										</ul>
+										{#if multiSender}
+											<span class="muted min-w-0 truncate">{senderLabel(message)}</span>
+										{/if}
+										<time
+											class="muted tabular shrink-0"
+											datetime={new Date(message.date * 1000).toISOString()}
+											>{messageTime(message.date)}</time
+										>
 									</div>
-								{/if}
-							</article>
+								</div>
+							{:else}
+								<!-- 收到的：靠左，时间在左，昵称/邮箱跟在后面 -->
+								<div
+									class="flex w-fit max-w-[88%] flex-col items-start"
+									title={messageDetails(message)}
+								>
+									{@render messageBody(message, 'rounded-tl-md')}
+									<div
+										class="mt-1 flex w-full min-w-0 items-center gap-2 px-1 text-[11px] leading-4"
+									>
+										<time
+											class="muted tabular shrink-0"
+											datetime={new Date(message.date * 1000).toISOString()}
+											>{messageTime(message.date)}</time
+										>
+										{#if multiSender}
+											<span class="muted min-w-0 truncate">{senderLabel(message)}</span>
+										{/if}
+									</div>
+								</div>
+							{/if}
 						{/each}
 					</div>
 				{/if}
