@@ -49,6 +49,9 @@ type User struct {
 	// BaseURL is prepended to public calendar feed URLs.
 	BaseURL string
 	Version string
+	// Events pushes mailbox changes to open tabs over SSE. Optional: when nil
+	// /api/user/events answers 503 and the UI simply keeps its manual refresh.
+	Events *EventHub
 }
 
 func (h *User) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +71,8 @@ func (h *User) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case path == "/events":
+		h.events(w, r, user)
 	case path == "/mail/folders":
 		h.mailFolders(w, r, user)
 	case path == "/mail/conversations":

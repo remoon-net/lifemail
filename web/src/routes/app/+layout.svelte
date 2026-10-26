@@ -6,6 +6,7 @@
 	import { page } from '$app/state';
 	import Icon from '#lib/components/Icon.svelte';
 	import Skeleton from '#lib/components/Skeleton.svelte';
+	import { mailEvents } from '#lib/mail-events.svelte';
 	import { userSession } from '#lib/user-session.svelte';
 	import { theme } from '#lib/theme.svelte';
 	import { iconButton } from '#lib/ui';
@@ -54,6 +55,14 @@
 		if (userSession.ready && !userSession.authenticated && !isLogin) {
 			void goto(`${base}/login/`);
 		}
+	});
+
+	$effect(() => {
+		// One event stream per tab for the whole signed-in session; signing out
+		// (or losing the cookie) closes it.
+		if (!userSession.authenticated) return;
+		mailEvents.start();
+		return () => mailEvents.stop();
 	});
 
 	$effect(() => {

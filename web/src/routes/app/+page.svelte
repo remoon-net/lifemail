@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import Button from '#lib/components/Button.svelte';
 	import ContactPicker from '#lib/components/ContactPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -9,6 +9,7 @@
 	import Skeleton from '#lib/components/Skeleton.svelte';
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import { mailApi } from '#lib/mail-api';
+	import { mailEvents } from '#lib/mail-events.svelte';
 	import { addressList, bytes, dateTime, relativeTime } from '#lib/format';
 	import { userSession } from '#lib/user-session.svelte';
 	import { toast } from '#lib/toast.svelte';
@@ -284,6 +285,32 @@
 			refreshing = false;
 		}
 	}
+
+	// --- server push ---------------------------------------------------------
+
+	// The layout keeps one SSE stream open per tab. Pushes (and reconnects, which
+	// may have missed some) only bump a revision, and the list is reloaded once
+	// per burst instead of once per message.
+	let handledRevision = mailEvents.revision;
+	let pushTimer: ReturnType<typeof setTimeout> | undefined;
+
+	$effect(() => {
+		const revision = mailEvents.revision;
+		if (revision === handledRevision) return;
+		handledRevision = revision;
+		const event = mailEvents.last;
+		if (event?.kind === 'mail' && event.action === 'new') {
+			const sender = event.from ? ` · ${event.from}` : '';
+			toast.push(`新邮件${sender}：${event.subject || '(无主题)'}`, 'info');
+		}
+		clearTimeout(pushTimer);
+		pushTimer = setTimeout(() => {
+			if (loading || refreshing) return;
+			void refresh();
+		}, 400);
+	});
+
+	onDestroy(() => clearTimeout(pushTimer));
 
 	async function open(conversation: Conversation, folder = folderId) {
 		if (!folder) return;
@@ -799,6 +826,14 @@
 						: `${conversations.length} 个会话`}</p
 				>
 			</div>
+			{#if mailEvents.connected}
+				<span
+					class="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"
+					role="img"
+					aria-label="实时推送已连接"
+					title="实时推送已连接"
+				></span>
+			{/if}
 			<button
 				type="button"
 				class={iconButton}

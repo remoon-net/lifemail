@@ -199,6 +199,26 @@
 
 返回字段与 `store.Contact` 对齐（姓名、公司、职务、三个邮箱、电话、地址、备注）。新建时至少要有姓名、公司或邮箱；`fileAs` 为空时按“姓+名”（中文）或“名 姓”（西文）生成。
 
+### 5.4 实时推送（SSE）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/events` | Server-Sent Events，登录账号的邮箱变更推送；`text/event-stream`，保持打开 |
+
+- 进程内 `EventHub`（`internal/api/events.go`）按 `userID` 扇出，**不轮询、不查库**：
+  每个标签页一条空闲连接，有新邮件才写数据。单账号最多 16 条流，超出返回 `429`（客户端 5s 后重试）。
+- 触发点在投递层：`deliver.OnInboxDelivered`（inbound、EAS/SMTP 本地投递都会走到）向
+  `EventHub` 发 `mail` 事件，负载为 `{kind,action,folderType,subject,from,at}`（主题/发件人截断，
+  只作为提示，真实数据靠重新拉取）。
+- 帧格式：连接建立先发 `event: ready`（客户端据此重新加载，覆盖断线期间漏掉的事件），
+  之后每个事件是 `event: <kind>` + `data: <json>`；每 25s 一条 `: ping` 注释保活。
+- 前端 `#lib/mail-events.svelte.ts` 维护 `connected / revision / last` 三个响应式状态：
+  非 200 响应（401/429/5xx）由客户端自己指数退避重连，网络中断交给 `EventSource` 自动重连。
+  邮件页监听 `revision`，合并 400ms 内的多次推送后刷新文件夹与会话列表，并弹一条新邮件提示。
+- 边界：事件不跨进程（单实例部署），也不覆盖 IMAP `APPEND` 直插库；断线与多标签页的最终一致
+  由 `ready` 触发的重新加载保证。响应带 `X-Accel-Buffering: no`，反向代理不得缓冲。
+- 停机时 `EventHub.Close()` 先结束所有流，避免优雅关闭等浏览器断开。
+
 ## 6. 数据层新增（`internal/store`）
 
 无 schema 变更，不需要迁移。
@@ -264,6 +284,8 @@ func (s *Store) EventsByFolderBetween(folderID, from, to int64) ([]*Event, error
   - 输入框：Enter 发送、Shift+Enter 换行，发送中禁用；主题自动为 `Re: 首封主题`，不需手填；
   - 发送成功后清空输入、刷新列表与会话，新副本带「已发送」标记。
 - 会话内的消息带上「已发送」小标记（`folderId === sentFolderId`），区分自己发出的那些。
+- 实时推送：列表头部有一个绿点表示 SSE 已连接；收到 `mail` 事件弹「新邮件 · 发件人：主题」，
+  并把 400ms 内的多次推送合并成一次列表/未读数刷新（见 5.4）。
 - HTML 正文用 `<iframe sandbox srcdoc>`（无 `allow-scripts`）渲染，保留内联样式、禁用脚本；无 HTML 时用 `whitespace-pre-wrap` 展示纯文本。
 - 附件按 `attachments` 元数据渲染，下载走 API。
 - 移动端：列表与阅读用单栏切换（返回按钮）。

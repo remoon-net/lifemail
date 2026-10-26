@@ -4,6 +4,24 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.5] - 2026-10-26
+
+### Added
+
+- 邮箱页新增 SSE 实时推送：`GET /api/user/events` 推送新邮件，列表头部显示连接状态
+  （绿点），收到推送后弹出「新邮件 · 发件人：主题」并自动刷新文件夹与会话，无需手动
+  点刷新
+- `internal/api` 新增进程内 `EventHub`：按账号扇出、慢客户端丢弃、单账号连接数上限、
+  停机时主动断开；触发点在投递层 `deliver.OnInboxDelivered`，inbound、EAS、SMTP
+  本地投递都能推到网页端
+- 前端新增 `mail-events.svelte.ts`：`EventSource` 封装，非 200 关闭时指数退避重连，
+  重连后重新加载数据以补齐断线期间漏掉的推送
+
+### Fixed
+
+- 请求日志中间件包装后的 `ResponseWriter` 丢失 `http.Flusher`，SSE 会被整段缓冲到请求
+  结束才输出；改用 `http.NewResponseController` 并在包装器上实现 `Unwrap()`
+
 ## [0.3.4] - 2026-10-26
 
 ### Added

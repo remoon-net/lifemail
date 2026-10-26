@@ -206,12 +206,17 @@ func runServer(cfg config.Config, opts serveOptions) {
 		AuthLimiter: authlimit.New(authMaxFailures, authFailureWindow, authLockout),
 		DumpDir:     cfg.EASDumpDir,
 	}
+	// Webmail tabs subscribe to this hub over SSE; new mail is published from
+	// the delivery hook below so every inbound path reaches the UI.
+	webEvents := api.NewEventHub()
 	// Out-of-office notices and iMIP replies must fire for every delivery path
 	// (EAS, IMAP submission, inbound API), so the hook lives in the delivery
 	// layer.
 	deliver.OnInboxDelivered = func(user *store.User, parsed *mailparse.Message, raw []byte) {
 		easServer.HandleIMipReply(user, parsed, raw)
 		easServer.OofReply(user, parsed, raw)
+		webEvents.Publish(user.ID, api.NewMailEvent(deliver.FolderInbox,
+			parsed.Subject, parsed.FromName, parsed.FromAddr))
 	}
 	mailAuthLimiter := authlimit.New(authMaxFailures, authFailureWindow, authLockout)
 	inbound := &api.Inbound{Store: st, Token: cfg.InboundToken, Log: logger,
@@ -306,6 +311,7 @@ func runServer(cfg config.Config, opts serveOptions) {
 			Version:       version,
 			Sender:        sender,
 			IsLocalDomain: isLocalDomain,
+			Events:        webEvents,
 		},
 		// Read-only iCalendar subscription feeds. The UUID in the path is the
 		// credential; whether it resolves at all is the owner's per-calendar
@@ -332,6 +338,9 @@ func runServer(cfg config.Config, opts serveOptions) {
 	}
 	go func() {
 		<-ctx.Done()
+		// End open SSE streams first, otherwise graceful shutdown waits for
+		// browsers to disconnect (up to the 10s budget below).
+		webEvents.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
@@ -523,6 +532,12 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer, which the
+// SSE endpoint needs to flush each event.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 func logRequests(log *slog.Logger, next http.Handler) http.Handler {
