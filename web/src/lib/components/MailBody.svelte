@@ -37,13 +37,28 @@
 		frame.style.height = `${Math.max(height, 24)}px`;
 	}
 
+	// Resizing the frame changes the wrapper height, which re-enters the
+	// observer synchronously. Deferring via rAF merges those into one pass and
+	// avoids "ResizeObserver loop completed with undelivered notifications".
+	let raf = 0;
+	function scheduleResize() {
+		if (raf) return;
+		raf = requestAnimationFrame(() => {
+			raf = 0;
+			resize();
+		});
+	}
+
 	// A narrower viewport reflows the message, so the height has to follow the
 	// frame's width as well as its onload event (images change it later too).
 	$effect(() => {
 		if (!wrapper) return;
-		const observer = new ResizeObserver(() => resize());
+		const observer = new ResizeObserver(scheduleResize);
 		observer.observe(wrapper);
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			if (raf) cancelAnimationFrame(raf);
+		};
 	});
 </script>
 
@@ -55,9 +70,9 @@
 			sandbox="allow-same-origin"
 			srcdoc={document_}
 				onload={() => {
-					resize();
+					scheduleResize();
 					// Images and web fonts settle after onload.
-					setTimeout(resize, 300);
+					setTimeout(scheduleResize, 300);
 				}}
 			class="w-full rounded-lg border-0 bg-white"
 			style="height: 24px"
