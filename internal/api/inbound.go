@@ -242,7 +242,7 @@ func (h *Inbound) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			SenderAddr:        parsed.SenderAddr,
 			SenderName:        parsed.SenderName,
 			ReceivedAsBcc:     receivedAsBcc(parsed, addr),
-			ConversationID:    mailparse.ConversationID(parsed),
+			ConversationID:    deliver.ConversationID(h.Store, user, parsed),
 			InternetMessageID: parsed.MessageID,
 			BodyText:          parsed.Text,
 			BodyHTML:          parsed.HTML,

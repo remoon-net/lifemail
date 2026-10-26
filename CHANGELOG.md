@@ -4,6 +4,19 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.3] - 2026-10-26
+
+### Fixed
+
+- 对方回复缺少 `In-Reply-To` / `References`（MIUI 邮件等客户端只在主题前加 `Re:`）
+  时不再自成一个新会话：按「规范化主题 + 参与者有交集」并入最老的匹配会话，收件箱
+  对话里「我方先发的那封」不会再消失。入站投递与本地/手机发信的已发送副本都适用
+
+### Added
+
+- `mailparse.NormalizedSubject`、`mailparse.IsReplySubject`、`store.ThreadForReply`
+  与 `deliver.ConversationID`，把「无线程头的回复归属」收敛到一处，供所有投递路径复用
+
 ## [0.3.2] - 2026-10-26
 
 ### Changed

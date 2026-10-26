@@ -82,7 +82,7 @@ func ToUser(st *store.Store, user *store.User, folderType int, parsed *mailparse
 		SenderAddr:        parsed.SenderAddr,
 		SenderName:        parsed.SenderName,
 		ReceivedAsBcc:     folderType == FolderInbox && receivedAsBcc(parsed, user.Address),
-		ConversationID:    mailparse.ConversationID(parsed),
+		ConversationID:    ConversationID(st, user, parsed),
 	}
 	id, err := st.InsertMessage(m)
 	if err != nil {
@@ -107,4 +107,27 @@ func ToUser(st *store.Store, user *store.User, folderType int, parsed *mailparse
 		NotifyInbox(user, parsed, raw)
 	}
 	return id, nil
+}
+
+// ConversationID picks the conversation key for a message that is about to be
+// stored. Normally the MIME headers decide; some clients (MIUI Mail among them)
+// send replies with only a "Re:" subject and drop References/In-Reply-To, which
+// would start a new thread and hide the message being answered. For those we
+// look up the thread by normalised subject plus participants.
+//
+// The lookup is best-effort: on error the header-derived key is used, so a
+// mailbox is never rejected because the thread index could not be read.
+func ConversationID(st *store.Store, user *store.User, parsed *mailparse.Message) string {
+	id := mailparse.ConversationID(parsed)
+	if len(parsed.References) > 0 || strings.TrimSpace(parsed.InReplyTo) != "" {
+		return id
+	}
+	if !mailparse.IsReplySubject(parsed.Subject) {
+		return id
+	}
+	thread, err := st.ThreadForReply(user.ID, parsed.Subject, parsed.FromAddr, mailparse.Addresses(parsed.To))
+	if err != nil || thread == "" {
+		return id
+	}
+	return thread
 }

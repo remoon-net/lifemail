@@ -106,6 +106,12 @@ EAS 只保存「规则 + 第一次时间」，展开由客户端完成。这一�
   `ConversationId` 换成十六进制、补发 22 字节 `ConversationIndex`（Email2 页的 base64
   二进制）后重新投递新邮件，仍然合并。所以这不是服务端 bug，别去改会话计算——要拆开
   只能改主题或换客户端。
+- **回复不带线程头**：发回复时只在主题前加 `Re:`，**不写 `In-Reply-To` / `References`**，
+  原文塞进 HTML 引用块（`<div class="wps_quotation"><blockquote …>`）。抓包见
+  `SendMail` 的 `sendmail.eml`：只有 `Date/Subject/Message-ID/From/To/MIME-Version/
+  Content-Type`。后果是按线程头分组的客户端（网页、Outlook、iOS 邮件）会把回复当成新会话，
+  原线程里"我方先发"的那封就看不到了。服务端兜底：`deliver.ConversationID` 对没有线程头
+  的回复按「规范化主题 + 参与者交集」并入最老的匹配线程（`store.ThreadForReply`）。
 - **已同步邮件基本不吃服务端 `Change`**：对已有邮件下发 `<Change>`（改主题）时，服务端
   确认返回了变更项，客户端列表却没有变化。验证协议行为要用新投递的邮件，不要靠修改历史
   邮件观察。

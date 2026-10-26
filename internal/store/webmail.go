@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/jmoiron/sqlx"
+
+	"remoon.net/lifemail/internal/mailparse"
 )
 
 // FolderCount is the unread/total tally shown next to a mail folder.
@@ -106,6 +108,110 @@ func (s *Store) conversationScope(userID string, folderID int64) ([]int64, error
 		scope = append(scope, sent)
 	}
 	return scope, nil
+}
+
+// ThreadForReply finds the conversation a reply belongs to when the client left
+// out References/In-Reply-To. Some clients (MIUI Mail among them) only add a
+// "Re:" prefix and quote the original in the body, which would otherwise start
+// a new thread and hide the message being replied to.
+//
+// The match has to agree on the normalised subject and share a participant: the
+// new sender must appear among the candidate's recipients, or the candidate's
+// sender must appear among the new recipients. Subject alone is not enough,
+// because unrelated senders often reuse a generic subject.
+//
+// It returns "" when nothing matches, so the caller keeps the message's own
+// key.
+func (s *Store) ThreadForReply(userID, subject, fromAddr string, toAddrs []string) (string, error) {
+	want := mailparse.NormalizedSubject(subject)
+	if want == "" {
+		return "", nil
+	}
+	inbox, sent, err := s.mailFolderIDs(userID)
+	if err != nil {
+		return "", err
+	}
+	if inbox == 0 && sent == 0 {
+		return "", nil
+	}
+	scope := make([]int64, 0, 2)
+	if inbox != 0 {
+		scope = append(scope, inbox)
+	}
+	if sent != 0 && sent != inbox {
+		scope = append(scope, sent)
+	}
+
+	type row struct {
+		Subject        string `db:"subject"`
+		FromAddr       string `db:"from_addr"`
+		ToAddr         string `db:"to_addr"`
+		CcAddr         string `db:"cc_addr"`
+		ConversationID string `db:"conversation_id"`
+	}
+	// Recent messages only: a reply belongs to a thread that was active
+	// recently, and scanning the whole mailbox on every delivery is wasteful.
+	q, args, err := sqlx.In(
+		`SELECT subject, from_addr, to_addr, cc_addr, conversation_id
+		 FROM messages
+		 WHERE user_id = ? AND deleted = 0 AND folder_id IN (?)
+		 ORDER BY date_received DESC, id DESC LIMIT 200`, userID, scope)
+	if err != nil {
+		return "", err
+	}
+	var rows []row
+	if err := s.getAll(&rows, q, args...); err != nil {
+		return "", err
+	}
+	newSender := strings.ToLower(strings.TrimSpace(fromAddr))
+	newRecipients := lowerAddressSet(toAddrs)
+	// Rows are newest first, so keep overwriting: the oldest match wins. The
+	// oldest message of a thread carries the thread's own key; newer replies may
+	// themselves be headerless strays with a key of their own.
+	match := ""
+	for _, r := range rows {
+		if r.ConversationID == "" || mailparse.NormalizedSubject(r.Subject) != want {
+			continue
+		}
+		if !replyParticipantsMatch(newSender, newRecipients, r.FromAddr, r.ToAddr, r.CcAddr) {
+			continue
+		}
+		match = r.ConversationID
+	}
+	return match, nil
+}
+
+// lowerAddressSet normalises a recipient list for case-insensitive comparison.
+func lowerAddressSet(addrs []string) map[string]bool {
+	out := make(map[string]bool, len(addrs))
+	for _, addr := range addrs {
+		if addr = strings.ToLower(strings.TrimSpace(addr)); addr != "" {
+			out[addr] = true
+		}
+	}
+	return out
+}
+
+// replyParticipantsMatch reports whether the two sides of a conversation know
+// each other: either the new sender wrote to the candidate, or the candidate's
+// sender is one of the new recipients.
+func replyParticipantsMatch(newSender string, newRecipients map[string]bool,
+	rowFrom, rowTo, rowCc string) bool {
+	sender := strings.ToLower(strings.TrimSpace(rowFrom))
+	if sender != "" && newRecipients[sender] {
+		return true
+	}
+	if newSender == "" {
+		return false
+	}
+	for _, list := range []string{rowTo, rowCc} {
+		for _, addr := range mailparse.Addresses(list) {
+			if strings.EqualFold(addr, newSender) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ConversationSummaries groups live messages by conversation, newest thread

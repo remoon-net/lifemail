@@ -77,8 +77,27 @@ func TestNormalizeSubject(t *testing.T) {
 		"Re:":              "",
 	}
 	for in, want := range cases {
-		if got := normalizeSubject(in); got != want {
-			t.Fatalf("normalizeSubject(%q) = %q, want %q", in, got, want)
+		if got := NormalizedSubject(in); got != want {
+			t.Fatalf("NormalizedSubject(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Only reply prefixes make a headerless message join an existing thread;
+// forwards are new conversations.
+func TestIsReplySubject(t *testing.T) {
+	cases := map[string]bool{
+		"Re: Invoice":      true,
+		"RE:  re: Invoice": true,
+		"回复: 会议纪要":         true,
+		"答复：报告":            true,
+		"Fwd: 会议纪要":        false,
+		"Invoice":          false,
+		"":                 false,
+	}
+	for in, want := range cases {
+		if got := IsReplySubject(in); got != want {
+			t.Fatalf("IsReplySubject(%q) = %v, want %v", in, got, want)
 		}
 	}
 }

@@ -30,11 +30,31 @@ func ConversationID(m *Message) string {
 		return "ref:" + id
 	}
 	// Neither a chain nor an id: a normalised subject is all that is left.
-	if subject := normalizeSubject(m.Subject); subject != "" {
+	if subject := NormalizedSubject(m.Subject); subject != "" {
 		sum := sha1.Sum([]byte(subject))
 		return "sub:" + hex.EncodeToString(sum[:8])
 	}
 	return ""
+}
+
+// replyPrefixes are the markers a client puts in front of a reply subject. They
+// are a subset of subjectPrefixes: forwards start a new thread on purpose.
+var replyPrefixes = []string{
+	"re:", "re：", "re ", "aw:", "sv:",
+	"回复:", "回复：", "答复:", "答复：",
+}
+
+// IsReplySubject reports whether the subject names itself a reply. It is used
+// to decide whether a message without References still belongs to an existing
+// thread: some clients (MIUI Mail among them) drop the threading headers.
+func IsReplySubject(subject string) bool {
+	s := strings.ToLower(strings.TrimSpace(subject))
+	for _, prefix := range replyPrefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // subjectPrefixes are stripped when normalising a subject, in the languages
@@ -46,9 +66,9 @@ var subjectPrefixes = []string{
 	"转发:", "转发：", "转发 ",
 }
 
-// normalizeSubject lower-cases a subject and removes reply/forward prefixes so
+// NormalizedSubject lower-cases a subject and removes reply/forward prefixes so
 // that "Re: Re: Invoice" and "Invoice" share one conversation.
-func normalizeSubject(subject string) string {
+func NormalizedSubject(subject string) string {
 	s := strings.ToLower(strings.TrimSpace(subject))
 	for {
 		trimmed := s
