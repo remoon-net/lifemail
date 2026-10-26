@@ -107,6 +107,17 @@ export const mailApi = {
 			method: 'POST',
 			...json(input)
 		}),
+	send: (input: {
+		to: string[];
+		cc: string[];
+		bcc: string[];
+		subject: string;
+		body: string;
+	}) =>
+		request<{ ok: boolean; queued: boolean }>('/mail/send', {
+			method: 'POST',
+			...json(input)
+		}),
 	attachmentUrl: (id: number) => `${PREFIX}/mail/attachments/${id}`,
 
 	calendars: () => request<{ calendars: CalendarRow[] }>('/calendars'),

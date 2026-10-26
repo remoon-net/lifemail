@@ -76,6 +76,8 @@ func (h *User) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.thread(w, r, user)
 	case path == "/mail/reply":
 		h.reply(w, r, user)
+	case path == "/mail/send":
+		h.send(w, r, user)
 	case path == "/mail/search":
 		h.searchMail(w, r, user)
 	case strings.HasPrefix(path, "/mail/messages/"):

@@ -118,7 +118,8 @@ func (h *User) reply(w http.ResponseWriter, r *http.Request, user *store.User) {
 			subject = replySubject(original.Subject)
 		}
 	}
-	out, messageID, err := buildReply(user, parsed, to, cc, subject, in.Body)
+	out, messageID, err := buildMessage(user, to, cc, subject, in.Body,
+		parsed.MessageID, replyReferences(parsed))
 	if err != nil {
 		h.logError("cannot build reply", err)
 		writeJSONError(w, http.StatusInternalServerError, "cannot build reply")
@@ -329,10 +330,10 @@ func replySubject(subject string) string {
 	return "Re: " + trimmed
 }
 
-// buildReply renders a plain-text reply with threading headers so it lands in
-// the original conversation.
-func buildReply(user *store.User, original *mailparse.Message, to, cc []string,
-	subject, body string) ([]byte, string, error) {
+// buildMessage renders a plain-text message. Threading headers are written only
+// when inReplyTo is set, so the same builder serves replies and new mail.
+func buildMessage(user *store.User, to, cc []string, subject, body, inReplyTo string,
+	references []string) ([]byte, string, error) {
 	if user.Address == "" {
 		return nil, "", errors.New("account has no primary address")
 	}
@@ -351,11 +352,11 @@ func buildReply(user *store.User, original *mailparse.Message, to, cc []string,
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "Message-ID: <%s>\r\n", messageID)
-	if inReplyTo := strings.Trim(original.MessageID, "<> "); inReplyTo != "" {
-		fmt.Fprintf(&b, "In-Reply-To: <%s>\r\n", inReplyTo)
+	if trimmed := strings.Trim(inReplyTo, "<> "); trimmed != "" {
+		fmt.Fprintf(&b, "In-Reply-To: <%s>\r\n", trimmed)
 	}
-	if refs := replyReferences(original); len(refs) > 0 {
-		fmt.Fprintf(&b, "References: %s\r\n", strings.Join(refs, " "))
+	if len(references) > 0 {
+		fmt.Fprintf(&b, "References: %s\r\n", strings.Join(references, " "))
 	}
 	fmt.Fprintf(&b, "MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&b, "Content-Type: text/plain; charset=utf-8\r\n")

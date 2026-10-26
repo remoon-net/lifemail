@@ -101,6 +101,7 @@
 | GET | `/mail/attachments/{id}` | 附件下载（`Content-Disposition: attachment`） |
 | POST | `/mail/messages/{id}/read` | 标记已读并 `AddChange(folder,"change","email",id)` |
 | POST | `/mail/reply` | `{messageId,body,replyAll,subject}` → 发送纯文本回复 |
+| POST | `/mail/send` | `{to,cc,bcc,subject,body}` → 发送新邮件 |
 
 会话摘要字段：
 
@@ -154,6 +155,19 @@
 - 先写已发送副本，再投递：本地收件人走 `deliver.ToUser`，外域走 `smtp.Sender`，
   投递失败进 `outbound` 队列并返回 `502`（响应 `{ok,queued}`）。
 - 只能回复自己的邮件（`messages.user_id` 不匹配返回 `404`）。
+
+### 5.1.3 写新邮件
+
+`POST /mail/send`：
+
+- 参数 `to` / `cc` / `bcc` / `subject` / `body`；收件人同样剔除自己的地址与重复项，
+  清理后 To 为空、正文为空或地址不含 `@` 都返回 `400`，总数上限 50。
+- `Bcc` 参与投递但不写进 `To:`/`Cc:` 头；本地收件人靠 `received_as_bcc` 标记。
+- 与回复共用 `buildMessage`，但**不写** `In-Reply-To` / `References`，所以自成会话。
+- 先写已发送副本，再投递（本地内部投递 / 外域 SMTP / 失败入 outbound 队列），
+  返回 `{ok,queued}`。
+- 草稿只存在浏览器的 `localStorage`（`lifemail.compose.draft`），不写服务器；
+  发送成功后清除。
 
 ### 5.2 日历
 
@@ -241,6 +255,10 @@ func (s *Store) EventsByFolderBetween(folderID, from, to int64) ([]*Event, error
 - 点击会话 → 阅读窗格加载 `thread`，按时间正序展示；进入即对未读消息调用 `read`。
 - 会话列表顶部有搜索框：**输入不触发请求**，回车或点「搜索」才发一次（服务端很轻量，
   防抖自动搜索压力太大）；结果里每条带文件夹标签，点击直接打开会话（不受当前文件夹限制）。
+- 写信**占据整个阅读窗格**（不是弹窗、也不是叠在底部）：点列表头部的「写邮件」后，
+  阅读区换成 `写邮件 · 收件人 chip · 发送 · 关闭` + 主题 + 大正文框；打开会话时会先存草稿
+  再回到回复模式，关闭写信则回到进入前的会话。
+- 收件人 chip 打开同一个弹窗（写信模式多一个「密送」字段）。
 - 阅读窗格底部是**聊天式回复区**（与会话连在一起，不再弹窗）：
   - 工具栏：当前回复对象（默认= 原发件人 + 原信 To/Cc，点开可编辑 To/Cc），以及「仅发件人」「全部回复」快捷切换；
   - 输入框：Enter 发送、Shift+Enter 换行，发送中禁用；主题自动为 `Re: 首封主题`，不需手填；

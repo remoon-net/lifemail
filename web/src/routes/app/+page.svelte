@@ -33,18 +33,58 @@
 	let messagesEl = $state<HTMLDivElement | null>(null);
 	let sentFolderId = $state(0);
 
-	let replyTarget = $state<ReplyTarget | null>(null);
-	let replyTo = $state('');
-	let replyCc = $state('');
-	let replyBody = $state('');
-	let replyBusy = $state(false);
+	// A reply and a new message are the same editor: one draft, two defaults.
+	type DraftMode = 'reply' | 'compose';
+
+	type Draft = {
+		mode: DraftMode;
+		// Message being replied to; 0 for a new message.
+		messageId: number;
+		to: string;
+		cc: string;
+		bcc: string;
+		subject: string;
+		body: string;
+		busy: boolean;
+		// Recipients the dialog can restore.
+		baseTo: string;
+		baseCc: string;
+	};
+
+	let draft = $state<Draft | null>(null);
+	// Conversation to return to when a new message is abandoned.
+	let composeReturn = $state<{ conversation: Conversation; folder: number } | null>(null);
+	let composeDraftRestored = $state(false);
+	// The draft kept in the browser, so the list can show it while not editing.
+	let savedDraft = $state<{ to: string; cc: string; bcc: string; subject: string; body: string } | null>(
+		null
+	);
+
 	let recipientsOpen = $state(false);
 	let draftTo = $state('');
 	let draftCc = $state('');
+	let draftBcc = $state('');
 
-	let toList = $derived(splitAddresses(replyTo));
-	let ccList = $derived(splitAddresses(replyCc));
-	let recipientCount = $derived(toList.length + ccList.length);
+	// The editor grows with its text, up to 40% of the viewport height.
+	let draftBodyEl = $state<HTMLTextAreaElement | null>(null);
+
+	function fitDraftBody() {
+		const el = draftBodyEl;
+		if (!el) return;
+		const max = Math.round(window.innerHeight * 0.4);
+		el.style.height = 'auto';
+		const wanted = el.scrollHeight;
+		el.style.height = `${Math.min(wanted, max)}px`;
+		el.style.overflowY = wanted > max ? 'auto' : 'hidden';
+	}
+
+	$effect(() => {
+		// Re-fit on mode switches, restored drafts and every edit.
+		void draftBodyEl;
+		void draft?.mode;
+		void draft?.body;
+		queueMicrotask(fitDraftBody);
+	});
 
 	let searchQuery = $state('');
 	let searchHits = $state<MailSearchHit[]>([]);
@@ -60,13 +100,21 @@
 
 	let searching$active = $derived(searchQuery.trim() !== '');
 	let searchPending = $derived(searchSubmitted !== searchQuery.trim());
-	let recipientSummary = $derived(
-		recipientCount === 0
-			? '选择收件人'
-			: recipientCount === 1
-				? (toList[0] ?? ccList[0] ?? '')
-				: `${toList[0] ?? ccList[0] ?? ''} 等 ${recipientCount} 人`
+	let draftToList = $derived(draft ? splitAddresses(draft.to) : []);
+	let draftCcList = $derived(draft ? splitAddresses(draft.cc) : []);
+	let draftBccList = $derived(draft ? splitAddresses(draft.bcc) : []);
+	let draftRecipientCount = $derived(
+		draftToList.length + draftCcList.length + draftBccList.length
 	);
+	let draftRecipientSummary = $derived(
+		draftRecipientCount === 0
+			? '选择收件人'
+			: draftRecipientCount === 1
+				? (draftToList[0] ?? draftCcList[0] ?? '')
+				: `${draftToList[0] ?? draftCcList[0] ?? ''} 等 ${draftRecipientCount} 人`
+	);
+	let draftCanSend = $derived(Boolean(draft && draftToList.length > 0 && draft.body.trim() !== ''));
+	let composing = $derived(draft?.mode === 'compose');
 
 	let currentFolder = $derived(folders.find((f) => f.id === folderId) ?? null);
 
@@ -121,6 +169,16 @@
 	}
 
 	onMount(async () => {
+		const stored = readComposeDraft();
+		if (stored.to || stored.cc || stored.bcc || stored.subject || stored.body) {
+			savedDraft = {
+				to: stored.to ?? '',
+				cc: stored.cc ?? '',
+				bcc: stored.bcc ?? '',
+				subject: stored.subject ?? '',
+				body: stored.body ?? ''
+			};
+		}
 		try {
 			await reloadFolders();
 			await loadConversations();
@@ -132,6 +190,9 @@
 	});
 
 	async function selectFolder(id: number) {
+		// Leaving the editor happens even when the folder is already selected, so
+		// clicking the current folder returns to its conversation list.
+		leaveDraft();
 		if (id === folderId) return;
 		folderId = id;
 		selected = null;
@@ -161,6 +222,9 @@
 
 	async function open(conversation: Conversation, folder = folderId) {
 		if (!folder) return;
+		// Opening a thread replaces the editor; a new message keeps its draft in
+		// the browser for the next 写邮件 click.
+		leaveDraft();
 		selected = conversation;
 		openFolderId = folder;
 		messages = [];
@@ -169,7 +233,8 @@
 			const res = await mailApi.thread(folder, conversation.key);
 			messages = res.messages;
 			sentFolderId = res.sentFolderId;
-			resetReply(res.replyTarget);
+			if (res.replyTarget) startReply(res.replyTarget);
+			else draft = null;
 			selected = { ...conversation, count: res.messages.length || conversation.count };
 			const unread = messages.filter((m) => !m.isRead);
 			if (unread.length > 0) {
@@ -192,10 +257,9 @@
 	}
 
 	function closeReader() {
+		draft = null;
 		selected = null;
 		messages = [];
-		replyTarget = null;
-		replyBody = '';
 		openFolderId = null;
 	}
 
@@ -273,61 +337,186 @@
 		return list.join(', ');
 	}
 
-	function resetReply(target: ReplyTarget | undefined) {
-		replyTarget = target ?? null;
-		replyTo = target ? joinAddresses(target.to ?? []) : '';
-		replyCc = target ? joinAddresses(target.cc ?? []) : '';
-		replyBody = '';
+	/** Builds the reply draft from the thread's default target. */
+	function startReply(target: ReplyTarget) {
+		draft = {
+			mode: 'reply',
+			messageId: target.messageId,
+			to: joinAddresses(target.to ?? []),
+			cc: joinAddresses(target.cc ?? []),
+			bcc: '',
+			subject: target.subject,
+			body: '',
+			busy: false,
+			baseTo: joinAddresses(target.to ?? []),
+			baseCc: joinAddresses(target.cc ?? [])
+		};
+	}
+
+	/** Drops the editor; a new message keeps its draft in the browser. */
+	function leaveDraft() {
+		if (!draft) return;
+		if (draft.mode === 'compose') saveComposeDraft();
+		else clearTimeout(composeTimer);
+		draft = null;
+		composeReturn = null;
+	}
+
+	function openCompose() {
+		const restored = savedDraft ?? readComposeDraft();
+		composeDraftRestored = Boolean(
+			restored.to || restored.cc || restored.bcc || restored.subject || restored.body
+		);
+		composeReturn =
+			selected && folderId ? { conversation: selected, folder: openFolderId ?? folderId } : null;
+		selected = null;
+		messages = [];
+		draft = {
+			mode: 'compose',
+			messageId: 0,
+			to: restored.to ?? '',
+			cc: restored.cc ?? '',
+			bcc: restored.bcc ?? '',
+			subject: restored.subject ?? '',
+			body: restored.body ?? '',
+			busy: false,
+			baseTo: '',
+			baseCc: ''
+		};
+	}
+
+	/** Leaves the editor and, for a new message, returns to the previous thread. */
+	async function closeDraft(reopenReply = true) {
+		const back = composeReturn;
+		const replyKey = selected?.key;
+		const replyFolder = openFolderId ?? folderId;
+		leaveDraft();
+		if (back) {
+			await open(back.conversation, back.folder);
+			return;
+		}
+		if (reopenReply && replyKey) {
+			const updated = conversations.find((item) => item.key === replyKey);
+			if (updated) await open(updated, replyFolder);
+		}
+	}
+
+	const COMPOSE_DRAFT_KEY = 'lifemail.compose.draft';
+	let composeTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function readComposeDraft(): Partial<Draft> {
+		try {
+			const raw = localStorage.getItem(COMPOSE_DRAFT_KEY);
+			return raw ? (JSON.parse(raw) as Partial<Draft>) : {};
+		} catch {
+			localStorage.removeItem(COMPOSE_DRAFT_KEY);
+			return {};
+		}
+	}
+
+	function saveComposeDraft() {
+		clearTimeout(composeTimer);
+		if (draft?.mode !== 'compose') return;
+		const saved = {
+			to: draft.to,
+			cc: draft.cc,
+			bcc: draft.bcc,
+			subject: draft.subject,
+			body: draft.body
+		};
+		if (!saved.to && !saved.cc && !saved.bcc && !saved.subject && !saved.body) {
+			localStorage.removeItem(COMPOSE_DRAFT_KEY);
+			savedDraft = null;
+			return;
+		}
+		localStorage.setItem(COMPOSE_DRAFT_KEY, JSON.stringify(saved));
+		savedDraft = saved;
+	}
+
+	/** Keeps the draft in the browser only: there is no autosave endpoint. */
+	function scheduleComposeSave() {
+		if (draft?.mode !== 'compose') return;
+		clearTimeout(composeTimer);
+		composeTimer = setTimeout(saveComposeDraft, 800);
+	}
+
+	function discardComposeDraft() {
+		clearTimeout(composeTimer);
+		localStorage.removeItem(COMPOSE_DRAFT_KEY);
+		savedDraft = null;
 	}
 
 	function openRecipients() {
-		draftTo = replyTo;
-		draftCc = replyCc;
+		if (!draft) return;
+		draftTo = draft.to;
+		draftCc = draft.cc;
+		draftBcc = draft.bcc;
 		recipientsOpen = true;
 	}
 
 	function applyRecipients(event: SubmitEvent) {
 		event.preventDefault();
-		replyTo = joinAddresses(splitAddresses(draftTo));
-		replyCc = joinAddresses(splitAddresses(draftCc));
+		if (!draft) {
+			recipientsOpen = false;
+			return;
+		}
+		draft.to = joinAddresses(splitAddresses(draftTo));
+		draft.cc = joinAddresses(splitAddresses(draftCc));
+		draft.bcc = joinAddresses(splitAddresses(draftBcc));
+		if (draft.mode === 'compose') scheduleComposeSave();
 		recipientsOpen = false;
 	}
 
-	async function sendReply() {
-		if (!replyTarget || !replyBody.trim() || replyBusy) return;
-		if (toList.length === 0) {
-			toast.fail('请至少填写一个收件人', '无法发送');
-			return;
-		}
-		replyBusy = true;
+	/** Restores the reply defaults inside the recipient dialog. */
+	function useDraftRecipients(all: boolean) {
+		if (!draft) return;
+		draftTo = all ? draft.baseTo : (splitAddresses(draft.baseTo)[0] ?? '');
+		draftCc = all ? draft.baseCc : '';
+	}
+
+	async function sendDraft() {
+		const current = draft;
+		if (!current || current.busy || !draftCanSend) return;
+		const to = draftToList;
+		const cc = draftCcList;
+		const bcc = draftBccList;
+		current.busy = true;
 		try {
-			await mailApi.reply({
-				messageId: replyTarget.messageId,
-				subject: replyTarget.subject,
-				body: replyBody.trim(),
-				to: toList,
-				cc: ccList
-			});
-			replyBody = '';
-			toast.ok('回复已发送');
-			const key = selected?.key;
+			if (current.mode === 'reply') {
+				await mailApi.reply({
+					messageId: current.messageId,
+					subject: current.subject,
+					body: current.body.trim(),
+					to,
+					cc
+				});
+			} else {
+				await mailApi.send({
+					to,
+					cc,
+					bcc,
+					subject: current.subject.trim(),
+					body: current.body
+				});
+			}
+			const wasReply = current.mode === 'reply';
+			if (!wasReply) discardComposeDraft();
+			draft = null;
+			toast.ok(wasReply ? '回复已发送' : '邮件已发送');
 			await refresh();
-			const updated = key ? conversations.find((item) => item.key === key) : undefined;
-			if (updated ?? selected)
-				await open((updated ?? selected) as Conversation, openFolderId ?? folderId);
+			await closeDraft();
 		} catch (err) {
 			toast.fail(err, '发送失败');
-		} finally {
-			replyBusy = false;
+			if (draft) draft.busy = false;
 		}
 	}
 
-	function onReplyKeydown(event: KeyboardEvent) {
+	function onDraftKeydown(event: KeyboardEvent) {
 		// Ctrl/⌘+Enter sends; a plain Enter breaks the line, so a half-written
 		// mail is never sent by accident (there is no unsend here).
 		if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
 			event.preventDefault();
-			void sendReply();
+			void sendDraft();
 		}
 	}
 </script>
@@ -384,7 +573,8 @@
 
 	<!-- Conversations -->
 	<section
-		class="surface flex min-h-[60vh] min-w-0 flex-col overflow-hidden lg:min-h-0 {selected
+		class="surface flex min-h-[60vh] min-w-0 flex-col overflow-hidden lg:min-h-0 {selected ||
+		draft
 			? 'hidden lg:flex'
 			: 'flex'}"
 	>
@@ -517,7 +707,7 @@
 				{/if}
 			{:else if loading}
 				<div class="p-3"><Skeleton rows={6} /></div>
-			{:else if conversations.length === 0}
+			{:else if conversations.length === 0 && !composing}
 				<EmptyState icon="mail" title="没有邮件" description="这个文件夹是空的。" />
 			{:else}
 				<ul class="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -567,30 +757,62 @@
 				</ul>
 			{/if}
 		</div>
+
+		<div class="shrink-0 border-t border-zinc-200 p-2 dark:border-zinc-800">
+			<Button variant="ghost" size="sm" class="w-full" onclick={openCompose}>
+				<Icon name="edit" size={14} />写邮件
+			</Button>
+		</div>
 	</section>
 
-	<!-- Reader -->
+	<!-- Reader: one thread view, with the composer docked at the bottom -->
 	<section
-		class="surface min-h-[60vh] min-w-0 flex-col overflow-hidden lg:min-h-0 {selected
+		class="surface min-h-[60vh] min-w-0 flex-col overflow-hidden lg:min-h-0 {selected || draft
 			? 'flex'
 			: 'hidden lg:flex'}"
 	>
-		{#if !selected}
+		{#if !selected && !draft}
 			<div class="flex flex-1 items-center justify-center">
 				<EmptyState icon="mail" title="选择一封邮件" description="会话会在这里展开。" />
 			</div>
 		{:else}
-			<header
-				class="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-3 dark:border-zinc-800"
-			>
-				<button
-					type="button"
-					class="{iconButton} lg:hidden"
-					onclick={closeReader}
-					aria-label="返回列表"
+			{#if composing}
+				<header
+					class="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-3 dark:border-zinc-800"
 				>
-					<Icon name="arrowLeft" size={16} />
-				</button>
+					<button
+						type="button"
+						class="{iconButton} lg:hidden"
+						onclick={() => closeDraft()}
+						aria-label="关闭写信"
+					>
+						<Icon name="arrowLeft" size={16} />
+					</button>
+					<div class="min-w-0 flex-1">
+						<p class="truncate text-[13px] font-semibold">
+							{draft?.subject.trim() || '新邮件'}
+						</p>
+						<p class="muted truncate text-[11px]">{draftRecipientSummary}</p>
+					</div>
+				</header>
+
+				<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+					<p class="muted text-center text-[12px]">
+						这是一封新邮件，在下面的输入框里填写收件人、主题和正文。
+					</p>
+				</div>
+			{:else if selected}
+				<header
+					class="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-3 dark:border-zinc-800"
+				>
+					<button
+						type="button"
+						class="{iconButton} lg:hidden"
+						onclick={closeReader}
+						aria-label="返回列表"
+					>
+						<Icon name="arrowLeft" size={16} />
+					</button>
 				<div class="min-w-0 flex-1">
 					<p class="truncate text-[13px] font-semibold">{selected.subject || '(无主题)'}</p>
 					<p class="muted text-[11px]">
@@ -599,7 +821,7 @@
 				</div>
 			</header>
 
-			<div bind:this={messagesEl} class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+<div bind:this={messagesEl} class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
 				{#if loadingThread}
 					<Skeleton rows={5} />
 				{:else}
@@ -658,60 +880,73 @@
 						{/each}
 					</div>
 				{/if}
-			</div>
+				</div>
 
-			<footer
-				class="shrink-0 border-t border-zinc-200 bg-zinc-50/70 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/40"
-			>
-				{#if replyTarget}
-					<div class="mb-2 flex items-center gap-1.5">
+			{/if}
+
+			{#if draft}
+				<footer
+					class="mt-auto shrink-0 border-t border-zinc-200 bg-zinc-50/70 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/40"
+				>
+					<div class="mb-1.5 flex items-center gap-1.5">
 						<span class="muted inline-flex shrink-0 items-center gap-1 text-[11px] font-medium">
-							<Icon name="arrowLeft" size={12} class="rotate-180" />回复
+							{#if composing}
+								<Icon name="edit" size={12} />写邮件
+							{:else}
+								<Icon name="arrowLeft" size={12} class="rotate-180" />回复
+							{/if}
 						</span>
 						<button
 							type="button"
-							class="inline-flex min-w-0 max-w-72 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-brand-300 hover:text-brand-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-brand-500/50 dark:hover:text-brand-300"
+							class="inline-flex min-w-0 max-w-64 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-brand-300 hover:text-brand-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-brand-500/50 dark:hover:text-brand-300"
 							onclick={openRecipients}
-							title={addressList([replyTo, replyCc].filter(Boolean).join(', '))}
+							title={addressList([draft.to, draft.cc, draft.bcc].filter(Boolean).join(', '))}
 						>
 							<Icon name="users" size={12} class="shrink-0" />
-							<span class="truncate">{recipientSummary}</span>
+							<span class="truncate">{draftRecipientSummary}</span>
 							<Icon name="edit" size={11} class="shrink-0 opacity-60" />
 						</button>
 						<div class="ml-auto flex shrink-0 items-center gap-1">
-							<Button
-								size="sm"
-								class="ml-0.5"
-								onclick={sendReply}
-								disabled={replyBusy || !replyBody.trim()}
-							>
-								{replyBusy ? '发送中…' : '发送'}
+							<Button size="sm" onclick={sendDraft} disabled={draft.busy || !draftCanSend}>
+								{draft.busy ? '发送中…' : '发送'}
 							</Button>
 						</div>
 					</div>
+					{#if composing}
+						<input
+							class="mb-1.5 h-8 w-full rounded-lg border border-zinc-200 bg-white px-2.5 text-[12px] text-zinc-800 placeholder:text-zinc-400 focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:ring-brand-500/20"
+							placeholder="主题"
+							bind:value={draft.subject}
+							oninput={scheduleComposeSave}
+							maxlength="500"
+						/>
+					{/if}
 					<textarea
-						class="{textarea} max-h-40 min-h-11 w-full resize-none text-[13px]"
+						class="{textarea} !min-h-11 w-full resize-none text-[13px]"
+						style="max-height: 40vh"
 						rows="2"
-						bind:value={replyBody}
-						disabled={replyBusy}
+						bind:this={draftBodyEl}
+						bind:value={draft.body}
+						disabled={draft.busy}
+						oninput={scheduleComposeSave}
+						onkeydown={onDraftKeydown}
 						placeholder="写点什么…"
-						onkeydown={onReplyKeydown}
 					></textarea>
 					<p class="muted mt-1 text-[10px]">
-						Ctrl/⌘+Enter 发送 · Enter 换行 · 主题 {replyTarget.subject}
+						Ctrl/⌘+Enter 发送 · Enter 换行{composing
+							? ` · 草稿只存在本浏览器${composeDraftRestored ? '（已恢复上次内容）' : ''}`
+							: ` · 主题 ${draft.subject}`}
 					</p>
-				{:else}
-					<p class="muted text-[11px]">这个会话没有可回复的地址。</p>
-				{/if}
-			</footer>
+				</footer>
+			{/if}
 		{/if}
 	</section>
 </div>
 
 <Modal
 	open={recipientsOpen}
-	title="回复对象"
-	description="用逗号或空格分隔多个地址；留空表示不抄送。"
+	title={composing ? '收件人' : '回复对象'}
+	description="用逗号或空格分隔多个地址；留空表示不发送给该字段。"
 	onclose={() => (recipientsOpen = false)}
 	width="max-w-lg"
 >
@@ -734,31 +969,40 @@
 				placeholder="可选"
 			></textarea>
 		</Field>
-		<div class="flex flex-wrap gap-1.5">
-			<Button
-				variant="ghost"
-				size="sm"
-				onclick={() => {
-					draftTo = replyTarget?.to[0] ?? '';
-					draftCc = '';
-				}}
-			>
-				仅发件人
-			</Button>
-			<Button
-				variant="ghost"
-				size="sm"
-				onclick={() => {
-					draftTo = joinAddresses(replyTarget?.to ?? []);
-					draftCc = joinAddresses(replyTarget?.cc ?? []);
-				}}
-			>
-				全部回复
-			</Button>
-		</div>
+		{#if composing}
+			<Field label="密送" for="reply-bcc">
+				<textarea
+					id="reply-bcc"
+					class={textarea}
+					rows="2"
+					bind:value={draftBcc}
+					placeholder="可选，不会出现在收件人的邮件头里"
+				></textarea>
+			</Field>
+		{:else}
+			<div class="flex flex-wrap gap-1.5">
+				<Button variant="ghost" size="sm" onclick={() => useDraftRecipients(false)}>
+					仅发件人
+				</Button>
+				<Button variant="ghost" size="sm" onclick={() => useDraftRecipients(true)}>
+					全部回复
+				</Button>
+			</div>
+		{/if}
 	</form>
 
 	{#snippet footer()}
+		{#if composing && (draftTo || draftCc || draftBcc)}
+			<Button
+				variant="ghost"
+				size="sm"
+				onclick={() => {
+					draftTo = draftCc = draftBcc = '';
+				}}
+			>
+				清空
+			</Button>
+		{/if}
 		<Button variant="secondary" size="sm" onclick={() => (recipientsOpen = false)}>取消</Button>
 		<Button type="submit" size="sm" form="recipients-form">确定</Button>
 	{/snippet}

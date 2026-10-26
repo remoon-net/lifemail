@@ -706,3 +706,84 @@ func TestUserSearchMail(t *testing.T) {
 		t.Fatalf("foreign folder status = %d", rec.Code)
 	}
 }
+
+func TestUserSendMail(t *testing.T) {
+	h, db, alice := newUserAPI(t)
+	cookie := loginUser(t, h)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carol, err := db.CreateUser("carol", "carol@example.com", "Carol", string(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dave, err := db.CreateUser("dave", "dave@example.com", "Dave", string(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := userDo(h, http.MethodPost, "/api/user/mail/send",
+		`{"to":["carol@example.com"],"cc":[],"bcc":["dave@example.com"],`+
+			`"subject":"项目启动","body":"周一上午开会"}`, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("send status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The visible recipient gets the message; the Bcc one does too, but does
+	// not appear in the headers.
+	for _, account := range []*store.User{carol, dave} {
+		inbox, err := db.FolderByType(account.ID, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, err := db.MessagesByFolder(inbox.ID, 10)
+		if err != nil || len(messages) != 1 {
+			t.Fatalf("%s inbox = %d messages (%v), want 1", account.Name, len(messages), err)
+		}
+		got := messages[0]
+		if got.Subject != "项目启动" {
+			t.Fatalf("%s subject = %q", account.Name, got.Subject)
+		}
+		if strings.Contains(strings.ToLower(got.ToAddr), "dave@") {
+			t.Fatalf("%s sees the Bcc recipient in To: %q", account.Name, got.ToAddr)
+		}
+		if account == dave && !got.ReceivedAsBcc {
+			t.Fatal("Bcc recipient should be flagged")
+		}
+	}
+
+	// The sender keeps a copy in Sent without threading headers.
+	sentFolder, err := db.FolderByType(alice.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentMessages, err := db.MessagesByFolder(sentFolder.ID, 10)
+	if err != nil || len(sentMessages) != 1 {
+		t.Fatalf("sent = %d messages (%v), want 1", len(sentMessages), err)
+	}
+	full, err := db.MessageByID(sentMessages[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(full.Raw), "In-Reply-To:") ||
+		strings.Contains(string(full.Raw), "References:") {
+		t.Fatal("new mail should not carry threading headers")
+	}
+	if got := full.ToAddr; strings.Contains(strings.ToLower(got), "dave@") {
+		t.Fatalf("Bcc leaked into To: %q", got)
+	}
+
+	// Invalid requests are rejected before anything is stored.
+	for _, body := range []string{
+		`{"to":["alice@example.com"],"body":"x"}`,
+		`{"to":["carol@example.com"],"body":"   "}`,
+		`{"to":["not-an-address"],"body":"x"}`,
+	} {
+		rec = userDo(h, http.MethodPost, "/api/user/mail/send", body, cookie)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("send %s: status %d, want 400", body, rec.Code)
+		}
+	}
+}
