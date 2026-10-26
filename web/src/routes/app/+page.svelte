@@ -1025,9 +1025,9 @@
 						/>
 					{/if}
 					<textarea
-						class="{textarea} !min-h-11 w-full resize-none text-[13px]"
+						class="{textarea} !min-h-28 w-full resize-none text-[13px] leading-5"
 						style="max-height: 40vh"
-						rows="2"
+						rows="5"
 						bind:this={draftBodyEl}
 						bind:value={draft.body}
 						disabled={draft.busy}

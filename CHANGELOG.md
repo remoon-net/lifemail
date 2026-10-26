@@ -4,6 +4,13 @@
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.2] - 2026-10-26
+
+### Changed
+
+- 对话底部的回复/写信输入框默认高度从 2 行（约 44px）提高到 5 行（最小 112px），
+  写长邮件时不必先手动拉伸；自动增高与 40vh 上限保持不变
+
 ## [0.3.0] - 2026-10-26
 
 ### Added
