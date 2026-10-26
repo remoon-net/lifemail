@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import Button from '#lib/components/Button.svelte';
+	import ContactPicker from '#lib/components/ContactPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 	import MailBody from '#lib/components/MailBody.svelte';
@@ -11,9 +12,10 @@
 	import { addressList, bytes, dateTime, relativeTime } from '#lib/format';
 	import { userSession } from '#lib/user-session.svelte';
 	import { toast } from '#lib/toast.svelte';
-	import { iconButton, textarea } from '#lib/ui';
+	import { iconButton, input, textarea } from '#lib/ui';
 	import type { IconName } from '#lib/icons';
 	import type {
+		Contact,
 		Conversation,
 		MailFolder,
 		MailMessage,
@@ -62,9 +64,10 @@
 	);
 
 	let recipientsOpen = $state(false);
-	let draftTo = $state('');
-	let draftCc = $state('');
-	let draftBcc = $state('');
+	// Recipients picked in the dialog, committed to the draft on confirm.
+	let pickedTo = $state<string[]>([]);
+	let pickedCc = $state<string[]>([]);
+	let pickedBcc = $state<string[]>([]);
 
 	// The editor grows with its text, up to 40% of the viewport height.
 	let draftBodyEl = $state<HTMLTextAreaElement | null>(null);
@@ -104,16 +107,12 @@
 	let draftToList = $derived(draft ? splitAddresses(draft.to) : []);
 	let draftCcList = $derived(draft ? splitAddresses(draft.cc) : []);
 	let draftBccList = $derived(draft ? splitAddresses(draft.bcc) : []);
-	let draftRecipientCount = $derived(
-		draftToList.length + draftCcList.length + draftBccList.length
-	);
-	let draftRecipientSummary = $derived(
-		draftRecipientCount === 0
-			? '选择收件人'
-			: draftRecipientCount === 1
-				? (draftToList[0] ?? draftCcList[0] ?? '')
-				: `${draftToList[0] ?? draftCcList[0] ?? ''} 等 ${draftRecipientCount} 人`
-	);
+	let draftRecipients = $derived([...draftToList, ...draftCcList, ...draftBccList]);
+	let draftRecipientSummary = $derived.by(() => {
+		if (draftRecipients.length === 0) return '选择收件人';
+		const first = recipientLabel(draftRecipients[0] ?? '');
+		return draftRecipients.length === 1 ? first : `${first} 等 ${draftRecipients.length} 人`;
+	});
 	let draftCanSend = $derived(Boolean(draft && draftToList.length > 0 && draft.body.trim() !== ''));
 	let composing = $derived(draft?.mode === 'compose');
 
@@ -417,6 +416,7 @@
 			baseTo: joinAddresses(target.to ?? []),
 			baseCc: joinAddresses(target.cc ?? [])
 		};
+		void loadContacts();
 	}
 
 	/** Drops the editor; a new message keeps its draft in the browser. */
@@ -449,6 +449,7 @@
 			baseTo: '',
 			baseCc: ''
 		};
+		void loadContacts();
 	}
 
 	/** Leaves the editor and, for a new message, returns to the previous thread. */
@@ -512,32 +513,138 @@
 		savedDraft = null;
 	}
 
+	// --- address book ---------------------------------------------------------
+
+	// The whole address book is loaded once and filtered in the browser: an
+	// account has few contacts, and the picker has to feel instant.
+	let contacts = $state<Contact[]>([]);
+	let contactsLoaded = $state(false);
+	let contactsLoading = $state(false);
+
+	async function loadContacts(force = false) {
+		if (contactsLoading || (contactsLoaded && !force)) return;
+		contactsLoading = true;
+		try {
+			const data = await mailApi.contacts('', 500);
+			contacts = data.contacts;
+			contactsLoaded = true;
+		} catch (err) {
+			toast.fail(err, '通讯录加载失败');
+		} finally {
+			contactsLoading = false;
+		}
+	}
+
+	// Addresses that belong to a contact are shown by name, not by address.
+	const contactNameByAddress = $derived.by(() => {
+		const map = new Map<string, string>();
+		for (const contact of contacts) {
+			const name = contact.display || contact.fileAs;
+			if (!name) continue;
+			for (const raw of [contact.email1, contact.email2, contact.email3]) {
+				const key = raw.trim().toLowerCase();
+				if (key) map.set(key, name);
+			}
+		}
+		return map;
+	});
+
+	function recipientLabel(address: string): string {
+		return contactNameByAddress.get(address.toLowerCase()) ?? address;
+	}
+
+	type RecipientField = 'to' | 'cc' | 'bcc';
+	const FIELD_LABEL: Record<RecipientField, string> = { to: '收件人', cc: '抄送', bcc: '密送' };
+
+	// A typed address that is not in the address book is added first, then picked.
+	let quickAdd = $state<{ field: RecipientField | null; name: string; email: string }>({
+		field: null,
+		name: '',
+		email: ''
+	});
+	let quickAddSaving = $state(false);
+
+	function closeQuickAdd() {
+		quickAdd = { field: null, name: '', email: '' };
+	}
+
+	function openQuickAdd(field: RecipientField, seed: { name: string; email: string }) {
+		quickAdd = { field, name: seed.name, email: seed.email };
+	}
+
+	function addPicked(field: RecipientField, address: string) {
+		const current = field === 'to' ? pickedTo : field === 'cc' ? pickedCc : pickedBcc;
+		if (current.some((item) => item.toLowerCase() === address.toLowerCase())) return;
+		const next = [...current, address];
+		if (field === 'to') pickedTo = next;
+		else if (field === 'cc') pickedCc = next;
+		else pickedBcc = next;
+	}
+
+	async function saveQuickAdd() {
+		if (!quickAdd || quickAdd.field === null || quickAddSaving) return;
+		const email = quickAdd.email.trim();
+		const name = quickAdd.name.trim();
+		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+			toast.fail(new Error('邮箱格式不正确'), '无法添加联系人');
+			return;
+		}
+		const field = quickAdd.field;
+		quickAddSaving = true;
+		try {
+			const created = await mailApi.createContact({ email1: email, ...(name ? { fileAs: name } : {}) });
+			contacts = [created.contact, ...contacts];
+			contactsLoaded = true;
+			addPicked(field, email);
+			closeQuickAdd();
+			toast.ok('联系人已添加并选中');
+		} catch (err) {
+			toast.fail(err, '添加联系人失败');
+		} finally {
+			quickAddSaving = false;
+		}
+	}
+
+	function quickAddSubmit(event: SubmitEvent) {
+		event.preventDefault();
+		void saveQuickAdd();
+	}
+
+	function closeRecipients() {
+		recipientsOpen = false;
+		closeQuickAdd();
+	}
+
 	function openRecipients() {
 		if (!draft) return;
-		draftTo = draft.to;
-		draftCc = draft.cc;
-		draftBcc = draft.bcc;
+		pickedTo = splitAddresses(draft.to);
+		pickedCc = splitAddresses(draft.cc);
+		pickedBcc = splitAddresses(draft.bcc);
+		closeQuickAdd();
 		recipientsOpen = true;
+		void loadContacts();
 	}
 
 	function applyRecipients(event: SubmitEvent) {
 		event.preventDefault();
 		if (!draft) {
-			recipientsOpen = false;
+			closeRecipients();
 			return;
 		}
-		draft.to = joinAddresses(splitAddresses(draftTo));
-		draft.cc = joinAddresses(splitAddresses(draftCc));
-		draft.bcc = joinAddresses(splitAddresses(draftBcc));
+		draft.to = joinAddresses(pickedTo);
+		draft.cc = joinAddresses(pickedCc);
+		draft.bcc = joinAddresses(pickedBcc);
 		if (draft.mode === 'compose') scheduleComposeSave();
-		recipientsOpen = false;
+		closeRecipients();
 	}
 
 	/** Restores the reply defaults inside the recipient dialog. */
 	function useDraftRecipients(all: boolean) {
 		if (!draft) return;
-		draftTo = all ? draft.baseTo : (splitAddresses(draft.baseTo)[0] ?? '');
-		draftCc = all ? draft.baseCc : '';
+		const to = splitAddresses(draft.baseTo);
+		pickedTo = all ? to : to.slice(0, 1);
+		pickedCc = all ? splitAddresses(draft.baseCc) : [];
+		closeQuickAdd();
 	}
 
 	async function sendDraft() {
@@ -1049,38 +1156,43 @@
 <Modal
 	open={recipientsOpen}
 	title={composing ? '收件人' : '回复对象'}
-	description="用逗号或空格分隔多个地址；留空表示不发送给该字段。"
-	onclose={() => (recipientsOpen = false)}
+	description="从通讯录选择；不在通讯录里的地址可以直接添加为新联系人。"
+	onclose={closeRecipients}
 	width="max-w-lg"
 >
 	<form id="recipients-form" class="space-y-3" onsubmit={applyRecipients}>
 		<Field label="收件人" for="reply-to">
-			<textarea
+			<ContactPicker
 				id="reply-to"
-				class={textarea}
-				rows="2"
-				bind:value={draftTo}
-				placeholder="a@example.com, b@example.com"
-			></textarea>
+				{contacts}
+				loading={contactsLoading}
+				value={pickedTo}
+				onchange={(next) => (pickedTo = next)}
+				onadd={(seed) => openQuickAdd('to', seed)}
+			/>
 		</Field>
 		<Field label="抄送" for="reply-cc">
-			<textarea
+			<ContactPicker
 				id="reply-cc"
-				class={textarea}
-				rows="2"
-				bind:value={draftCc}
+				{contacts}
+				loading={contactsLoading}
+				value={pickedCc}
+				onchange={(next) => (pickedCc = next)}
+				onadd={(seed) => openQuickAdd('cc', seed)}
 				placeholder="可选"
-			></textarea>
+			/>
 		</Field>
 		{#if composing}
 			<Field label="密送" for="reply-bcc">
-				<textarea
+				<ContactPicker
 					id="reply-bcc"
-					class={textarea}
-					rows="2"
-					bind:value={draftBcc}
+					{contacts}
+					loading={contactsLoading}
+					value={pickedBcc}
+					onchange={(next) => (pickedBcc = next)}
+					onadd={(seed) => openQuickAdd('bcc', seed)}
 					placeholder="可选，不会出现在收件人的邮件头里"
-				></textarea>
+				/>
 			</Field>
 		{:else}
 			<div class="flex flex-wrap gap-1.5">
@@ -1095,18 +1207,58 @@
 	</form>
 
 	{#snippet footer()}
-		{#if composing && (draftTo || draftCc || draftBcc)}
+		{#if composing && (pickedTo.length > 0 || pickedCc.length > 0 || pickedBcc.length > 0)}
 			<Button
 				variant="ghost"
 				size="sm"
 				onclick={() => {
-					draftTo = draftCc = draftBcc = '';
+					pickedTo = [];
+					pickedCc = [];
+					pickedBcc = [];
 				}}
 			>
 				清空
 			</Button>
 		{/if}
-		<Button variant="secondary" size="sm" onclick={() => (recipientsOpen = false)}>取消</Button>
+		<Button variant="secondary" size="sm" onclick={closeRecipients}>取消</Button>
 		<Button type="submit" size="sm" form="recipients-form">确定</Button>
+	{/snippet}
+</Modal>
+
+<Modal
+	open={quickAdd.field !== null}
+	title="新建联系人"
+	description={quickAdd.field
+		? `保存后自动加入${FIELD_LABEL[quickAdd.field]}并选中该地址。`
+		: ''}
+	onclose={closeQuickAdd}
+	width="max-w-md"
+>
+	<form id="quick-add-form" class="space-y-3" onsubmit={quickAddSubmit}>
+		<Field label="姓名" for="quick-add-name" hint="留空则用邮箱作为显示名">
+			<input
+				id="quick-add-name"
+				class={input}
+				bind:value={quickAdd.name}
+				placeholder="张三"
+				maxlength="100"
+			/>
+		</Field>
+		<Field label="邮箱" for="quick-add-email">
+			<input
+				id="quick-add-email"
+				class={input}
+				type="email"
+				bind:value={quickAdd.email}
+				placeholder="name@example.com"
+			/>
+		</Field>
+	</form>
+
+	{#snippet footer()}
+		<Button variant="secondary" size="sm" onclick={closeQuickAdd}>取消</Button>
+		<Button type="submit" size="sm" form="quick-add-form" disabled={quickAddSaving}>
+			{quickAddSaving ? '保存中…' : '保存并选择'}
+		</Button>
 	{/snippet}
 </Modal>

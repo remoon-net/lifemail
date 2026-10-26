@@ -16,6 +16,10 @@
 		$props();
 
 	let dialog = $state<HTMLDialogElement | null>(null);
+	// Only a press that starts on the backdrop may close the dialog. Content
+	// can grow and shrink (e.g. a suggestion list), which moves the dialog
+	// under the pointer between press and click.
+	let backdropPressed = $state(false);
 
 	$effect(() => {
 		const element = dialog;
@@ -31,8 +35,12 @@
 		event.preventDefault();
 		onclose();
 	}}
+	onpointerdown={(event) => {
+		backdropPressed = event.target === dialog;
+	}}
 	onclick={(event) => {
-		if (event.target === dialog) onclose();
+		if (backdropPressed && event.target === dialog) onclose();
+		backdropPressed = false;
 	}}
 	class="{width} m-auto w-[calc(100%-2rem)] rounded-2xl border border-zinc-200 bg-white p-0 text-zinc-900 shadow-2xl backdrop:bg-zinc-950/50 backdrop:backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
 >
