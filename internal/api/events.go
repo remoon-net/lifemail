@@ -28,25 +28,36 @@ type Event struct {
 	FolderID   int64  `json:"folderId,omitempty"`
 	FolderType int    `json:"folderType,omitempty"`
 	MessageID  int64  `json:"messageId,omitempty"`
-	Subject    string `json:"subject,omitempty"`
-	From       string `json:"from,omitempty"`
-	At         int64  `json:"at"`
+	// ConversationKey is the encoded thread key, the same value the reader got
+	// from /mail/conversations. It lets an open thread tell that the message
+	// belongs to it and offer "load new messages" instead of reloading.
+	ConversationKey string `json:"conversationKey,omitempty"`
+	Subject         string `json:"subject,omitempty"`
+	From            string `json:"from,omitempty"`
+	At              int64  `json:"at"`
 }
 
 // NewMailEvent describes a message that just landed in an inbox. Headers are
 // truncated because the payload is only a hint: the UI reloads the real thing.
-func NewMailEvent(folderType int, subject, fromName, fromAddr string) Event {
+func NewMailEvent(folderType int, subject, fromName, fromAddr, conversationID string,
+	messageID int64) Event {
 	from := strings.TrimSpace(fromName)
 	if from == "" {
 		from = strings.TrimSpace(fromAddr)
 	}
+	key := ""
+	if id := strings.TrimSpace(conversationID); id != "" {
+		key = encodeKey(id)
+	}
 	return Event{
-		Kind:       "mail",
-		Action:     "new",
-		FolderType: folderType,
-		Subject:    truncateRunes(subject, 160),
-		From:       truncateRunes(from, 120),
-		At:         time.Now().Unix(),
+		Kind:            "mail",
+		Action:          "new",
+		FolderType:      folderType,
+		MessageID:       messageID,
+		ConversationKey: key,
+		Subject:         truncateRunes(subject, 160),
+		From:            truncateRunes(from, 120),
+		At:              time.Now().Unix(),
 	}
 }
 

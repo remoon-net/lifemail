@@ -184,6 +184,22 @@ func TestUserConversationsAndRead(t *testing.T) {
 		t.Fatalf("thread = %d %s", rec.Code, rec.Body.String())
 	}
 
+	// "since" returns only what arrived after the reader's newest message.
+	if _, err := db.InsertMessage(&store.Message{
+		UserID: user.ID, FolderID: inbox.ID, Subject: "Re: 合同",
+		FromName: "张三", FromAddr: "z@example.com", DateReceived: 300,
+		ConversationID: "ref:a@x", BodyText: "第三条",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec = userDo(h, http.MethodGet,
+		"/api/user/mail/thread?key="+key+"&since="+itoaInt(second), "", cookie)
+	if rec.Code != http.StatusOK ||
+		strings.Contains(rec.Body.String(), `"bodyText":"收到"`) ||
+		!strings.Contains(rec.Body.String(), `"bodyText":"第三条"`) {
+		t.Fatalf("thread since = %d %s", rec.Code, rec.Body.String())
+	}
+
 	// Marking read flips the flag and records a sync change.
 	rec = userDo(h, http.MethodPost, "/api/user/mail/messages/"+itoaInt(second)+"/read", "", cookie)
 	if rec.Code != http.StatusOK {
@@ -534,6 +550,30 @@ func TestUserReply(t *testing.T) {
 			`,"body":"收到，明天答复","replyAll":true}`, cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reply status = %d: %s", rec.Code, rec.Body.String())
+	}
+	// The stored copy and the next reply defaults come back with the response,
+	// so an open reader can append the message without reloading the thread.
+	var replyResp struct {
+		Message struct {
+			ID       int64  `json:"id"`
+			FolderID int64  `json:"folderId"`
+			BodyText string `json:"bodyText"`
+		} `json:"message"`
+		ReplyTarget struct {
+			MessageID int64    `json:"messageId"`
+			To        []string `json:"to"`
+		} `json:"replyTarget"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &replyResp); err != nil {
+		t.Fatal(err)
+	}
+	if replyResp.Message.ID == 0 || replyResp.Message.BodyText != "收到，明天答复" {
+		t.Fatalf("reply message = %+v", replyResp.Message)
+	}
+	if replyResp.ReplyTarget.MessageID != replyResp.Message.ID ||
+		len(replyResp.ReplyTarget.To) != 2 || replyResp.ReplyTarget.To[0] != "bob@example.com" ||
+		replyResp.ReplyTarget.To[1] != "carol@example.com" {
+		t.Fatalf("reply target = %+v", replyResp.ReplyTarget)
 	}
 
 	for _, account := range []*store.User{bob, carol} {

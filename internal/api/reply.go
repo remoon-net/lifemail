@@ -134,7 +134,8 @@ func (h *User) reply(w http.ResponseWriter, r *http.Request, user *store.User) {
 		writeJSONError(w, http.StatusInternalServerError, "cannot parse reply")
 		return
 	}
-	if _, err := deliver.ToUser(h.Store, user, deliver.FolderSent, sent, out); err != nil {
+	sentID, err := deliver.ToUser(h.Store, user, deliver.FolderSent, sent, out)
+	if err != nil {
 		h.logError("cannot store sent reply", err)
 		writeJSONError(w, http.StatusInternalServerError, "cannot store sent reply")
 		return
@@ -151,7 +152,33 @@ func (h *User) reply(w http.ResponseWriter, r *http.Request, user *store.User) {
 		h.Log.Info("webmail reply sent", "user", user.Name, "to", strings.Join(to, ","),
 			"cc", strings.Join(cc, ","), "message_id", messageID, "queued", queued)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": queued})
+	writeJSON(w, http.StatusOK, h.sentReplyPayload(user, sentID, queued))
+}
+
+// sentReplyPayload returns the stored Sent copy along with the reply target for
+// it, so an open reader can append the message it just sent instead of
+// reloading the whole conversation.
+func (h *User) sentReplyPayload(user *store.User, messageID int64, queued bool) map[string]any {
+	payload := map[string]any{"ok": true, "queued": queued}
+	meta, err := h.Store.MessageMetaByID(messageID)
+	if err != nil {
+		if h.Log != nil {
+			h.Log.Warn("cannot read sent reply", "err", err, "message", messageID)
+		}
+		return payload
+	}
+	view, err := h.messageView(meta)
+	if err != nil {
+		if h.Log != nil {
+			h.Log.Warn("cannot build sent reply view", "err", err, "message", messageID)
+		}
+		return payload
+	}
+	payload["message"] = view
+	if target := h.replyTargetFor(user, []*store.Message{meta}, meta.FolderID); target != nil {
+		payload["replyTarget"] = target
+	}
+	return payload
 }
 
 // replyRecipients works out Reply vs Reply All, ignoring the account's own

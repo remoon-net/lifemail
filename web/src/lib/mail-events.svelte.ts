@@ -15,6 +15,12 @@ export type MailEvent = {
 	folderId?: number;
 	folderType?: number;
 	messageId?: number;
+	/**
+	 * Encoded thread key of the new message, as returned by
+	 * /mail/conversations. An open reader compares it with its own key to tell
+	 * whether the mail belongs to the thread on screen.
+	 */
+	conversationKey?: string;
 	subject?: string;
 	from?: string;
 	at?: number;

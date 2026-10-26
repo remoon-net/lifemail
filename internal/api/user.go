@@ -399,7 +399,15 @@ func (h *User) thread(w http.ResponseWriter, r *http.Request, user *store.User) 
 		writeJSONError(w, http.StatusBadRequest, "invalid conversation key")
 		return
 	}
-	messages, err := h.Store.ConversationMessages(user.ID, key, folder.ID, 200)
+	// "since" is the id of the newest message the reader already shows; only
+	// what arrived after it is returned, so a late push costs one small query
+	// instead of the whole thread.
+	var messages []*store.Message
+	if since := int64(queryInt(r, "since", 0)); since > 0 {
+		messages, err = h.Store.ConversationMessagesAfter(user.ID, key, folder.ID, since, 200)
+	} else {
+		messages, err = h.Store.ConversationMessages(user.ID, key, folder.ID, 200)
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeJSONError(w, http.StatusNotFound, "conversation not found")

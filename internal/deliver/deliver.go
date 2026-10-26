@@ -20,7 +20,7 @@ const (
 // InboxHook runs after a message lands in an inbox. It lets callers react to new
 // mail (out-of-office notices, notifications) without this package knowing about
 // SMTP. It must not block for long: it runs on the delivery path.
-type InboxHook func(user *store.User, parsed *mailparse.Message, raw []byte)
+type InboxHook func(user *store.User, parsed *mailparse.Message, raw []byte, messageID int64, conversationID string)
 
 // OnInboxDelivered is called for every message stored in an inbox.
 var OnInboxDelivered InboxHook
@@ -44,9 +44,9 @@ func receivedAsBcc(parsed *mailparse.Message, addr string) bool {
 // NotifyInbox runs the inbox hook, if any. Every code path that stores a
 // message in an inbox must call it, otherwise auto-replies and calendar
 // responses silently stop working for that path.
-func NotifyInbox(user *store.User, parsed *mailparse.Message, raw []byte) {
+func NotifyInbox(user *store.User, parsed *mailparse.Message, raw []byte, messageID int64, conversationID string) {
 	if OnInboxDelivered != nil {
-		OnInboxDelivered(user, parsed, raw)
+		OnInboxDelivered(user, parsed, raw, messageID, conversationID)
 	}
 }
 
@@ -104,7 +104,7 @@ func ToUser(st *store.Store, user *store.User, folderType int, parsed *mailparse
 		return id, err
 	}
 	if folderType == FolderInbox {
-		NotifyInbox(user, parsed, raw)
+		NotifyInbox(user, parsed, raw, id, m.ConversationID)
 	}
 	return id, nil
 }

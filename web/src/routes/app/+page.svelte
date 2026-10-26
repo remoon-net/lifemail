@@ -35,6 +35,14 @@
 	let loadingThread = $state(false);
 	let refreshing = $state(false);
 	let messagesEl = $state<HTMLDivElement | null>(null);
+	// Content wrapper of the reader; observed so bodies that grow after the
+	// first paint (images, iframes) keep the view glued to the newest message.
+	let threadContentEl = $state<HTMLDivElement | null>(null);
+	// True while the reader follows the bottom of the thread. Scrolling up
+	// detaches it, and new mail then waits behind the "load" button.
+	let pinnedBottom = $state(true);
+	let newMailPending = $state(false);
+	let loadingNew = $state(false);
 	let sentFolderId = $state(0);
 
 	// A reply and a new message are the same editor: one draft, two defaults.
@@ -222,6 +230,41 @@
 		return address === '' ? name : `${name} <${address}>`;
 	}
 
+	/** One-line preview, matching what the conversation list receives. */
+	function previewText(text: string, max = 140): string {
+		const joined = text.replace(/\s+/g, ' ').trim();
+		return joined.length > max ? `${joined.slice(0, max)}…` : joined;
+	}
+
+	/** Distance from the bottom that still counts as "reading the newest". */
+	const BOTTOM_SLACK = 48;
+
+	function scrollThreadToBottom(behavior: ScrollBehavior = 'auto') {
+		const el = messagesEl;
+		if (!el) return;
+		el.scrollTo({ top: el.scrollHeight, behavior });
+	}
+
+	function onThreadScroll() {
+		const el = messagesEl;
+		if (!el) return;
+		pinnedBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
+	}
+
+	// Message bodies are sandboxed iframes that resize themselves after load,
+	// so a single scroll-to-bottom before those resizes lands near the top.
+	// The observer re-pins while the reader has not scrolled away.
+	$effect(() => {
+		const el = messagesEl;
+		const inner = threadContentEl;
+		if (!el || !inner) return;
+		const observer = new ResizeObserver(() => {
+			if (pinnedBottom) el.scrollTop = el.scrollHeight;
+		});
+		observer.observe(inner);
+		return () => observer.disconnect();
+	});
+
 	async function reloadFolders() {
 		const res = await mailApi.folders();
 		folders = [...res.folders].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
@@ -263,6 +306,7 @@
 		folderId = id;
 		selected = null;
 		messages = [];
+		newMailPending = false;
 		refreshing = true;
 		try {
 			await loadConversations();
@@ -306,11 +350,67 @@
 		clearTimeout(pushTimer);
 		pushTimer = setTimeout(() => {
 			if (loading || refreshing) return;
+			if (
+				event?.kind === 'mail' &&
+				event.action === 'new' &&
+				selected &&
+				event.conversationKey === selected.key
+			) {
+				// The open thread is never replaced under the reader: the new
+				// message waits behind a button, so scroll position and the
+				// reply draft survive.
+				newMailPending = true;
+			}
 			void refresh();
 		}, 400);
 	});
 
 	onDestroy(() => clearTimeout(pushTimer));
+
+	/**
+	 * Appends the messages that arrived after the newest one on screen. Only
+	 * unknown ids are merged, so a full-thread fallback (the anchor was deleted)
+	 * still lands the reader in the right state without a visual reset.
+	 */
+	async function loadNewMessages() {
+		const key = selected?.key;
+		const folder = openFolderId ?? folderId;
+		if (!key || !folder || loadingNew) return;
+		loadingNew = true;
+		const anchor = messages.length > 0 ? messages[messages.length - 1].id : 0;
+		try {
+			const res = await mailApi.thread(folder, key, anchor);
+			sentFolderId = res.sentFolderId;
+			const seen = new Set(messages.map((m) => m.id));
+			const added = res.messages.filter((m) => !seen.has(m.id));
+			if (added.length > 0) {
+				messages = [...messages, ...added];
+				selected = selected
+					? {
+							...selected,
+							count: messages.length,
+							lastAt: added[added.length - 1].date,
+							unread: 0
+						}
+					: selected;
+				const unread = added.filter((m) => !m.isRead);
+				if (unread.length > 0) {
+					await Promise.all(unread.map((m) => mailApi.markRead(m.id)));
+					messages = messages.map((m) => (m.isRead ? m : { ...m, isRead: true }));
+					await reloadFolders();
+				}
+			}
+			newMailPending = false;
+			await loadConversations();
+			await tick();
+			pinnedBottom = true;
+			scrollThreadToBottom('smooth');
+		} catch (err) {
+			toast.fail(err, '无法加载新消息');
+		} finally {
+			loadingNew = false;
+		}
+	}
 
 	async function open(conversation: Conversation, folder = folderId) {
 		if (!folder) return;
@@ -320,6 +420,9 @@
 		selected = conversation;
 		openFolderId = folder;
 		messages = [];
+		// A freshly opened thread always starts at its newest message.
+		newMailPending = false;
+		pinnedBottom = true;
 		loadingThread = true;
 		try {
 			const res = await mailApi.thread(folder, conversation.key);
@@ -345,7 +448,7 @@
 			loadingThread = false;
 		}
 		await tick();
-		if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+		scrollThreadToBottom();
 	}
 
 	function closeReader() {
@@ -353,6 +456,7 @@
 		selected = null;
 		messages = [];
 		openFolderId = null;
+		newMailPending = false;
 	}
 
 	// Searches only run on submit: the server is small and a per-keystroke
@@ -682,14 +786,18 @@
 		const bcc = draftBccList;
 		current.busy = true;
 		try {
+			let sentView: MailMessage | undefined;
+			let nextTarget: ReplyTarget | undefined;
 			if (current.mode === 'reply') {
-				await mailApi.reply({
+				const res = await mailApi.reply({
 					messageId: current.messageId,
 					subject: current.subject,
 					body: current.body.trim(),
 					to,
 					cc
 				});
+				sentView = res.message;
+				nextTarget = res.replyTarget;
 			} else {
 				await mailApi.send({
 					to,
@@ -703,12 +811,56 @@
 			if (!wasReply) discardComposeDraft();
 			draft = null;
 			toast.ok(wasReply ? '回复已发送' : '邮件已发送');
+			if (wasReply) {
+				await appendSent(sentView, nextTarget);
+				return;
+			}
 			await refresh();
 			await closeDraft();
 		} catch (err) {
 			toast.fail(err, '发送失败');
 			if (draft) draft.busy = false;
 		}
+	}
+
+	/**
+	 * Shows a reply the server just stored at the end of the open thread. The
+	 * conversation list entry is patched in place, so neither the thread nor
+	 * the list is reloaded. Falls back to reopening the thread when the server
+	 * did not return the stored copy.
+	 */
+	async function appendSent(message: MailMessage | undefined, target?: ReplyTarget) {
+		if (!message) {
+			await refresh();
+			await closeDraft();
+			return;
+		}
+		const key = selected?.key;
+		if (!messages.some((m) => m.id === message.id)) messages = [...messages, message];
+		if (selected) {
+			selected = { ...selected, count: messages.length, lastAt: message.date, unread: 0 };
+		}
+		if (key) {
+			conversations = conversations.map((item) =>
+				item.key === key
+					? {
+							...item,
+							count: item.count + 1,
+							lastAt: message.date,
+							latestMessageId: message.id,
+							unread: 0,
+							hasAttachments: message.hasAttachments,
+							preview: previewText(message.bodyText)
+						}
+					: item
+			);
+		}
+		// Keep the editor ready for the next turn in the same thread.
+		if (target) startReply(target);
+		newMailPending = false;
+		pinnedBottom = true;
+		await tick();
+		scrollThreadToBottom('smooth');
 	}
 
 	function onDraftKeydown(event: KeyboardEvent) {
@@ -1075,12 +1227,17 @@
 				</div>
 			</header>
 
-<div bind:this={messagesEl} class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-				{#if loadingThread}
-					<Skeleton rows={5} />
-				{:else}
-					<div class="space-y-4">
-						{#each messages as message (message.id)}
+<div class="relative min-h-0 flex-1">
+				<div
+					bind:this={messagesEl}
+					onscroll={onThreadScroll}
+					class="h-full overflow-y-auto px-4 py-4"
+				>
+					{#if loadingThread}
+						<Skeleton rows={5} />
+					{:else}
+						<div bind:this={threadContentEl} class="space-y-4">
+							{#each messages as message (message.id)}
 							{#if isOutgoing(message)}
 								<!-- 我发送的：靠右，信息备注靠右，时间在最右端 -->
 								<div
@@ -1122,10 +1279,29 @@
 									</div>
 								</div>
 							{/if}
-						{/each}
+							{/each}
+						</div>
+					{/if}
+				</div>
+
+				{#if newMailPending}
+					<div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+						<button
+							type="button"
+							class="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-3.5 py-1.5 text-[12px] font-medium text-white shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-700 disabled:opacity-70"
+							onclick={loadNewMessages}
+							disabled={loadingNew}
+						>
+							<Icon
+								name={loadingNew ? 'refresh' : 'arrowDown'}
+								size={13}
+								class={loadingNew ? 'animate-spin' : ''}
+							/>
+							{loadingNew ? '加载中…' : '有新消息，点击加载'}
+						</button>
 					</div>
 				{/if}
-				</div>
+			</div>
 
 			{/if}
 

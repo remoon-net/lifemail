@@ -40,6 +40,7 @@ export const icons = {
 	star: '<path d="M12 3.6l2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.8l5.9-.8Z"/>',
 	arrowRight: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>',
 	arrowLeft: '<path d="M19 12H5"/><path d="m11 18-6-6 6-6"/>',
+	arrowDown: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
 	paperclip:
 		'<path d="M21.4 11.5 12.6 20a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8.5-8.5"/>',
 	download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>',

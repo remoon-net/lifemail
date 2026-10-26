@@ -384,6 +384,51 @@ func (s *Store) ConversationMessages(userID, key string, folderID int64, limit i
 	return messageRows(rows), nil
 }
 
+// ConversationMessagesAfter returns the live messages of one thread that are
+// newer than the message with id afterID, oldest first. It lets an open reader
+// append a late arrival without refetching the whole thread.
+//
+// When the anchor is gone (deleted meanwhile) or belongs to another thread the
+// full thread is returned, so a caller that only appends unknown ids still
+// converges to the right list.
+func (s *Store) ConversationMessagesAfter(userID, key string, folderID, afterID int64, limit int) ([]*Message, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	// A "m:<id>" fallback thread holds exactly one message, so nothing can be
+	// newer than it.
+	if _, ok := strings.CutPrefix(key, "m:"); ok {
+		return nil, nil
+	}
+	scope, err := s.conversationScope(userID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	anchor, err := s.MessageMetaByID(afterID)
+	if err != nil || anchor.UserID != userID || anchor.Deleted ||
+		anchor.ConversationID != key || !containsID(scope, anchor.FolderID) {
+		return s.ConversationMessages(userID, key, folderID, limit)
+	}
+	// Messages are ordered by (date_received, id); the id alone is not
+	// monotonic because a thread spans folders.
+	q, args, err := sqlx.In(
+		messageSelect+` WHERE user_id = ? AND deleted = 0 AND folder_id IN (?) AND conversation_id = ?
+		 AND (date_received > ? OR (date_received = ? AND id > ?))
+		 ORDER BY date_received, id LIMIT ?`,
+		userID, scope, key, anchor.DateReceived, anchor.DateReceived, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	var rows []messageRow
+	if err := s.getAll(&rows, q, args...); err != nil {
+		return nil, err
+	}
+	return messageRows(rows), nil
+}
+
 func containsID(ids []int64, id int64) bool {
 	for _, candidate := range ids {
 		if candidate == id {

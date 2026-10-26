@@ -273,7 +273,7 @@ func (h *Inbound) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// The inbound API is a delivery path of its own, so the same hook that
 		// runs for SMTP deliveries has to run here too.
-		deliver.NotifyInbox(user, parsed, raw)
+		deliver.NotifyInbox(user, parsed, raw, id, m.ConversationID)
 		resp.Delivered = append(resp.Delivered, delivered{To: addr, MessageID: id})
 	}
 

@@ -212,11 +212,12 @@ func runServer(cfg config.Config, opts serveOptions) {
 	// Out-of-office notices and iMIP replies must fire for every delivery path
 	// (EAS, IMAP submission, inbound API), so the hook lives in the delivery
 	// layer.
-	deliver.OnInboxDelivered = func(user *store.User, parsed *mailparse.Message, raw []byte) {
+	deliver.OnInboxDelivered = func(user *store.User, parsed *mailparse.Message, raw []byte,
+		messageID int64, conversationID string) {
 		easServer.HandleIMipReply(user, parsed, raw)
 		easServer.OofReply(user, parsed, raw)
 		webEvents.Publish(user.ID, api.NewMailEvent(deliver.FolderInbox,
-			parsed.Subject, parsed.FromName, parsed.FromAddr))
+			parsed.Subject, parsed.FromName, parsed.FromAddr, conversationID, messageID))
 	}
 	mailAuthLimiter := authlimit.New(authMaxFailures, authFailureWindow, authLockout)
 	inbound := &api.Inbound{Store: st, Token: cfg.InboundToken, Log: logger,

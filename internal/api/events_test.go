@@ -101,12 +101,19 @@ func TestEventHubCloseEndsStreams(t *testing.T) {
 }
 
 func TestNewMailEventTruncatesHeaders(t *testing.T) {
-	ev := NewMailEvent(deliver.FolderInbox, strings.Repeat("主", 300), "", "bob@example.com")
+	ev := NewMailEvent(deliver.FolderInbox, strings.Repeat("主", 300), "", "bob@example.com",
+		"conv-1", 42)
 	if ev.From != "bob@example.com" {
 		t.Fatalf("from = %q", ev.From)
 	}
 	if runes := []rune(ev.Subject); len(runes) != 161 || runes[160] != '…' {
 		t.Fatalf("subject was not truncated: %d runes", len(runes))
+	}
+	if ev.ConversationKey != encodeKey("conv-1") {
+		t.Fatalf("conversationKey = %q", ev.ConversationKey)
+	}
+	if ev.MessageID != 42 {
+		t.Fatalf("messageID = %d", ev.MessageID)
 	}
 }
 
@@ -185,7 +192,8 @@ func TestUserEventsStreamPushesNewMail(t *testing.T) {
 		t.Fatalf("first frame = %q %+v", name, ev)
 	}
 
-	h.Events.Publish(user.ID, NewMailEvent(deliver.FolderInbox, "hi there", "Bob", "bob@example.com"))
+	h.Events.Publish(user.ID, NewMailEvent(deliver.FolderInbox, "hi there", "Bob", "bob@example.com",
+		"conv-1", 42))
 	name, ev = readEvent(t, reader)
 	if name != "mail" {
 		t.Fatalf("event name = %q", name)

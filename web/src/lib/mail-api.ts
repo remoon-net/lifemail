@@ -81,13 +81,16 @@ export const mailApi = {
 		request<{ folderId: number; conversations: Conversation[] }>(
 			`/mail/conversations?limit=${limit}${folderId ? `&folder=${folderId}` : ''}`
 		),
-	thread: (folderId: number, key: string) =>
+	thread: (folderId: number, key: string, since = 0) =>
 		request<{
 			folderId: number;
 			sentFolderId: number;
 			messages: MailMessage[];
 			replyTarget?: ReplyTarget;
-		}>(`/mail/thread?folder=${folderId}&key=${encodeURIComponent(key)}`),
+		}>(
+			`/mail/thread?folder=${folderId}&key=${encodeURIComponent(key)}` +
+				(since > 0 ? `&since=${since}` : '')
+		),
 	message: (id: number) => request<{ message: MailMessage }>(`/mail/messages/${id}`),
 	markRead: (id: number) =>
 		request<{ ok: boolean; read: boolean }>(`/mail/messages/${id}/read`, { method: 'POST' }),
@@ -103,7 +106,14 @@ export const mailApi = {
 		to: string[];
 		cc: string[];
 	}) =>
-		request<{ ok: boolean; queued: boolean }>('/mail/reply', {
+		request<{
+			ok: boolean;
+			queued: boolean;
+			/** The copy stored in Sent, so the reader can append it directly. */
+			message?: MailMessage;
+			/** Reply defaults derived from the message just sent. */
+			replyTarget?: ReplyTarget;
+		}>('/mail/reply', {
 			method: 'POST',
 			...json(input)
 		}),
